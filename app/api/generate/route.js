@@ -1,15 +1,28 @@
+import { createClient } from '@supabase/supabase-js';
+
 export async function POST(request) {
   try {
+    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!token || !supabaseUrl || !supabaseKey) {
+      return Response.json({ error: 'Please sign in to create an image.' }, { status: 401 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
+    }
+
     const { prompt } = await request.json();
-    if (!prompt || typeof prompt !== 'string') {
-      return Response.json({ error: 'Please provide an image description.' }, { status: 400 });
+    if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) {
+      return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     }
 
     const apiKey = process.env.RUNPOD_API_KEY;
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-    if (!apiKey || !endpointId) {
-      return Response.json({ error: 'Image generation is not configured yet.' }, { status: 503 });
-    }
+    if (!apiKey || !endpointId) return Response.json({ error: 'Image generation is not configured yet.' }, { status: 503 });
 
     const workflow = {
       '6': { inputs: { text: prompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
@@ -22,20 +35,12 @@ export async function POST(request) {
       '35': { inputs: { guidance: 3.5, conditioning: ['6', 0] }, class_type: 'FluxGuidance' }
     };
 
-    const response = await fetch(
-      `https://api.runpod.ai/v2/${endpointId}/runsync`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ input: { workflow } }) }
-    );
+    const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ input: { workflow } }) });
     const data = await response.json();
-    if (!response.ok || data.status === 'FAILED') {
-      return Response.json({ error: data.error || data.output?.error || 'Generation failed. Please try again.' }, { status: 502 });
-    }
-
-    const image = data.output?.message;
-    if (!image) return Response.json({ error: 'RunPod did not return an image.' }, { status: 502 });
-    return Response.json({ image });
-  } catch (error) {
+    if (!response.ok || data.status === 'FAILED') return Response.json({ error: data.error || data.output?.error || 'Generation failed. Please try again.' }, { status: 502 });
+    if (!data.output?.message) return Response.json({ error: 'RunPod did not return an image.' }, { status: 502 });
+    return Response.json({ image: data.output.message });
+  } catch {
     return Response.json({ error: 'Unable to generate an image right now.' }, { status: 500 });
   }
 }
-
