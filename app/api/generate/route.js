@@ -1,5 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
+const prohibitedPromptPatterns = [
+  /\b(nsfw|nude|nudity|naked|porn|porno|pornographic|sex|sexual|erotic|fetish|lingerie|topless|breast|nipple|genital|penis|vagina|anal|orgasm|masturbat|incest|rape|onlyfans)\b/i,
+  /\b(child|children|minor|underage|teen|teenager|schoolgirl|schoolboy|young girl|young boy|loli|lolita)\b/i,
+  /\b(non[- ]?consensual|intimate deepfake|sexual deepfake)\b/i
+];
+
+function isProhibitedPrompt(prompt) {
+  return prohibitedPromptPatterns.some((pattern) => pattern.test(prompt));
+}
+
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -18,6 +28,9 @@ export async function POST(request) {
     const { prompt } = await request.json();
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) {
       return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
+    }
+    if (isProhibitedPrompt(prompt)) {
+      return Response.json({ error: 'This request is not permitted. Gabitor does not allow sexual, nude, adult, minor-related, or non-consensual content.' }, { status: 400 });
     }
 
     const apiKey = process.env.RUNPOD_API_KEY;
