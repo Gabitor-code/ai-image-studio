@@ -40,17 +40,17 @@ export async function POST(request) {
       return Response.json({ error: 'This request is not permitted. Gabitor does not allow sexual, nude, adult, minor-related, or non-consensual content.' }, { status: 400 });
     }
 
-    const userSupabase = createClient(supabaseUrl, supabaseKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } }
-    });
-    const { data: creditData, error: creditError } = await userSupabase.rpc('consume_generation_credit');
-    if (creditError) {
-      return Response.json({ error: creditErrorMessage(creditError.message) }, { status: 429 });
-    }
-
     const apiKey = process.env.RUNPOD_API_KEY;
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     if (!apiKey || !endpointId) return Response.json({ error: 'Image generation is not configured yet.' }, { status: 503 });
+
+    const userSupabase = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
+    });
+    const { error: reservationError } = await userSupabase.rpc('reserve_generation_slot');
+    if (reservationError) {
+      return Response.json({ error: creditErrorMessage(reservationError.message) }, { status: 429 });
+    }
 
     const workflow = {
       '6': { inputs: { text: prompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
@@ -65,10 +65,13 @@ export async function POST(request) {
 
     const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ input: { workflow } }) });
     const data = await response.json();
-    if (!response.ok || data.status === 'FAILED') return Response.json({ error: data.error || data.output?.error || 'Generation failed. Please try again.' }, { status: 502 });
-    if (!data.output?.message) return Response.json({ error: 'RunPod did not return an image.' }, { status: 502 });
+    if (!response.ok || data.status === 'FAILED') return Response.json({ error: data.error || data.output?.error || 'Generation failed. Your credit was not used.' }, { status: 502 });
+    if (!data.output?.message) return Response.json({ error: 'RunPod did not return an image. Your credit was not used.' }, { status: 502 });
+
+    const { data: creditData, error: creditError } = await userSupabase.rpc('complete_generation_credit');
+    if (creditError) return Response.json({ error: 'Your image was created, but we could not finalize the credit. Please contact support before trying again.' }, { status: 500 });
     return Response.json({ image: data.output.message, remainingCredits: creditData?.remaining_credits });
   } catch {
-    return Response.json({ error: 'Unable to generate an image right now.' }, { status: 500 });
+    return Response.json({ error: 'Unable to generate an image right now. Your credit was not used.' }, { status: 500 });
   }
 }
