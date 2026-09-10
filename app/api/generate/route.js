@@ -10,6 +10,13 @@ function isProhibitedPrompt(prompt) {
   return prohibitedPromptPatterns.some((pattern) => pattern.test(prompt));
 }
 
+function creditErrorMessage(message = '') {
+  if (message.includes('INSUFFICIENT_CREDITS')) return 'You do not have enough credits to generate an image.';
+  if (message.includes('RATE_LIMITED')) return 'Please wait 10 seconds before starting another generation.';
+  if (message.includes('PROFILE_NOT_FOUND')) return 'Your account credits are still being set up. Please sign out and sign in again.';
+  return 'Unable to verify your credits right now. Please try again.';
+}
+
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -33,6 +40,14 @@ export async function POST(request) {
       return Response.json({ error: 'This request is not permitted. Gabitor does not allow sexual, nude, adult, minor-related, or non-consensual content.' }, { status: 400 });
     }
 
+    const userSupabase = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
+    });
+    const { data: creditData, error: creditError } = await userSupabase.rpc('consume_generation_credit');
+    if (creditError) {
+      return Response.json({ error: creditErrorMessage(creditError.message) }, { status: 429 });
+    }
+
     const apiKey = process.env.RUNPOD_API_KEY;
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     if (!apiKey || !endpointId) return Response.json({ error: 'Image generation is not configured yet.' }, { status: 503 });
@@ -52,7 +67,7 @@ export async function POST(request) {
     const data = await response.json();
     if (!response.ok || data.status === 'FAILED') return Response.json({ error: data.error || data.output?.error || 'Generation failed. Please try again.' }, { status: 502 });
     if (!data.output?.message) return Response.json({ error: 'RunPod did not return an image.' }, { status: 502 });
-    return Response.json({ image: data.output.message });
+    return Response.json({ image: data.output.message, remainingCredits: creditData?.remaining_credits });
   } catch {
     return Response.json({ error: 'Unable to generate an image right now.' }, { status: 500 });
   }
