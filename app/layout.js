@@ -1,4 +1,5 @@
 import './globals.css';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata = {
   title: 'Gabitor AI',
@@ -6,5 +7,5 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }) {
-  return <html lang="en-US"><body>{children}</body></html>;
+  return <html lang="en-US"><body>{children}<Analytics /></body></html>;
 }
