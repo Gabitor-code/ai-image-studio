@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createHmac, timingSafeEqual } from 'crypto';
 
-const PLAN_CREDITS = { starter: 50 };
+const PLAN_CREDITS = { starter: 50, creator: 150, pro: 400 };
 
 function validSignature(payload, signature, secret) {
   const values = Object.fromEntries(signature.split(',').map((entry) => entry.split('=')));
