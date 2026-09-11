@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const PLANS = { starter: { credits: 50, priceEnv: 'STRIPE_STARTER_PRICE_ID' } };
+const PLANS = {
+  starter: { credits: 50, priceEnv: 'STRIPE_STARTER_PRICE_ID' },
+  creator: { credits: 150, priceEnv: 'STRIPE_CREATOR_PRICE_ID' },
+  pro: { credits: 400, priceEnv: 'STRIPE_PRO_PRICE_ID' }
+};
 
 export async function POST(request) {
   try {
