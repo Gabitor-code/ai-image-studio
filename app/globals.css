@@ -6,3 +6,7 @@
 .sample-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.sample{min-height:235px;background-position:center;background-size:cover;transition:transform .25s ease,box-shadow .25s ease}.sample:hover{transform:translateY(-5px);box-shadow:0 16px 30px rgba(0,0,0,.28)}@media(max-width:900px){.sample-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* High-contrast primary CTA */
 .start{background:var(--violet);color:#fff;box-shadow:0 10px 24px rgba(119,100,255,.3)}
+/* Restore the dark hero visual and readable CTA */
+.hero{background:linear-gradient(90deg,rgba(7,9,20,.92) 0%,rgba(7,9,20,.68) 48%,rgba(7,9,20,.2) 100%),url('/gabitor-future-ai.png') center/cover no-repeat;color:#fff}
+.hero .lead{color:#eeeaff}
+.start{background:var(--violet);color:#fff;box-shadow:0 10px 24px rgba(119,100,255,.35)}
