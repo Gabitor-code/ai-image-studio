@@ -88,7 +88,7 @@ export default function Home() {
     <section id="top" className="hero">
       <p className="eyebrow">AI CREATIVE STUDIO</p><h1>Create images.<br/><em>Tell stories in motion.</em></h1>
       <p className="lead">One creative studio where your ideas become visuals. Make images and videos shaped around your vision.</p>
-      <a className="start" href="#studio">Start creating <span>↓</span></a><div className="orb orb-one"/><div className="orb orb-two"/>
+      <a className="start" href="#studio">Start creating <span>↓</span></a>
     </section>
     <section id="studio" className="studio-wrap">
       <div className="section-title"><p>01 / STUDIO</p><h2>What will you create?</h2></div>
