@@ -97,7 +97,7 @@ export default function Home() {
     <nav className="nav">
       <a className="brand" href="#top"><span>✦</span> GABITOR</a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
-      {user ? <button className="account" onClick={signOut}>Sign out</button> : <button className="account" onClick={() => { setAuthMode('signin'); setAuthMessage(''); setAuthOpen(true); }}>Sign in</button>}
+      {user ? <div className="profile-area"><div className="profile-chip"><span className="profile-avatar">{(user.email || 'G').charAt(0).toUpperCase()}</span><span className="profile-info"><strong>{user.email}</strong><small>{credits ?? '…'} credits</small></span></div><button className="account" onClick={signOut}>Sign out</button></div> : <button className="account" onClick={() => { setAuthMode('signin'); setAuthMessage(''); setAuthOpen(true); }}>Sign in</button>}
     </nav>
     <section id="top" className="hero">
       <p className="eyebrow">AI CREATIVE STUDIO</p><h1>Create images.<br/><em>Tell stories in motion.</em></h1>
