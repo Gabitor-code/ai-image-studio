@@ -23,6 +23,8 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [image, setImage] = useState('');
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
 
@@ -73,10 +75,19 @@ export default function Home() {
 
   async function signOut() { await supabase?.auth.signOut(); setNotice('You have been signed out.'); }
   function openSignup() { setAuthMode('signup'); setAuthMessage(''); setAuthOpen(true); }
-  function generate() {
+  async function generate() {
     if (!user) { setAuthMode('signup'); setAuthMessage('Create an account to start generating.'); setAuthOpen(true); return; }
     if (!prompt.trim()) { setNotice('Start by writing a short description.'); return; }
-    setNotice('Image and video generation will be available here soon.');
+    setGenerating(true); setImage(''); setNotice('Creating your image…');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Please sign in again to generate.');
+      const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Image generation failed.');
+      setImage(data.image); setNotice('Your image is ready.');
+    } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
+    finally { setGenerating(false); }
   }
 
   return <main>
@@ -97,7 +108,7 @@ export default function Home() {
         <button className={mode === 'video' ? 'mode active' : 'mode'} onClick={() => setMode('video')}><span>▷</span> Video</button>
       </div>
       <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'image' ? 'Example: An elegant perfume bottle in moonlight, on deep-blue marble...' : 'Example: A vintage sports car driving slowly through a sunlit Italian village...'} />
-      <div className="card-bottom"><button className="settings">✧ Settings</button><button className="generate" onClick={generate}>Generate <span>→</span></button></div>{notice && <p className="notice">{notice}</p>}</div>
+      <div className="card-bottom"><button className="settings">✧ Settings</button><button className="generate" disabled={generating} onClick={generate}>{generating ? 'Creating…' : <>Generate <span>→</span></>}</button></div>{notice && <p className="notice">{notice}</p>}{image && <div className="result-image"><img src={image} alt="Your Gabitor creation" /></div>}</div>
       <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? setNotice('Credit purchases will be available once payments are connected.') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
     <section id="gallery" className="gallery-section">
