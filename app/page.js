@@ -88,7 +88,9 @@ export default function Home() {
       const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
-      setImage(data.image); setNotice('Your image is ready.');
+      setImage(data.image);
+      if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
+      setNotice('Your image is ready.');
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
