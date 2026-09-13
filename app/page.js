@@ -30,6 +30,7 @@ export default function Home() {
   const [quality, setQuality] = useState('high');
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
+  const [creations, setCreations] = useState([]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -62,6 +63,11 @@ export default function Home() {
     return () => { active = false; };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) { setCreations([]); return; }
+    try { setCreations(JSON.parse(localStorage.getItem(`gabitor-creations-${user.id}`) || '[]')); } catch { setCreations([]); }
+  }, [user]);
+
   async function submitAuth(event) {
     event.preventDefault();
     if (!supabase) { setAuthMessage('Account access is being configured. Please try again shortly.'); return; }
@@ -90,6 +96,8 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
       setImage(data.image);
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
+      const creation = { id: Date.now(), image: data.image, prompt: prompt.trim(), createdAt: new Date().toISOString() };
+      setCreations(previous => { const next = [creation, ...previous].slice(0, 12); try { localStorage.setItem(`gabitor-creations-${user.id}`, JSON.stringify(next)); } catch {} return next; });
       setNotice('Your image is ready.');
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
@@ -121,7 +129,7 @@ export default function Home() {
       <div className="section-title"><p>02 / INSPIRATION</p><h2>Start with an idea.</h2></div><div className="sample-grid">
       {samples.map(([name, text, kind, image]) => <button key={name} className="sample" style={{ backgroundImage: `url(${image})` }} onClick={() => { setMode(kind); setPrompt(text); document.getElementById('studio').scrollIntoView({ behavior: 'smooth' }); }}><span className="sample-kind">{kind === 'image' ? 'IMAGE' : 'VIDEO'}</span><strong>{name}</strong><i>↗</i></button>)}</div>
       <button className="gallery-button" onClick={() => setShowGallery(!showGallery)}>{showGallery ? 'Close gallery' : 'Open gallery'} <span>→</span></button>
-      {showGallery && <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}
+      {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}><img src={creation.image} alt={creation.prompt} /><div><p>{creation.prompt}</p><a href={creation.image} download={`gabitor-${creation.id}.png`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
     <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>50 credits</strong><span>AI image generations · Private creations · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>150 credits</strong><span>AI image generations · Best value · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>400 credits</strong><span>AI image generations · 20% more credits · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Pro →</button></div></div></section>
     <footer><a className="brand" href="#top"><span>✦</span> GABITOR</a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
