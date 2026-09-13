@@ -10,9 +10,9 @@ export async function POST(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt, style, resolution = '768', quality = 'high' } = await request.json();
+    const { prompt, style, resolution = '768', quality = 'high', referenceImage } = await request.json();
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
-    const finalPrompt = style && style !== 'None' ? `${style} style, ${prompt}` : prompt;
+    const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Preserve the original subject, face, pose, body, and clothing exactly; only change the requested atmosphere or background. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
     const steps = quality === 'standard' ? 16 : 28;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
@@ -24,11 +24,13 @@ export async function POST(request) {
       '9': { inputs: { filename_prefix: 'Gabitor', images: ['8', 0] }, class_type: 'SaveImage' },
       '27': { inputs: { width: size, height: size, batch_size: 1 }, class_type: 'EmptySD3LatentImage' },
       '30': { inputs: { ckpt_name: 'flux1-dev-fp8.safetensors' }, class_type: 'CheckpointLoaderSimple' },
-      '31': { inputs: { seed: Math.floor(Math.random() * 999999999999999), steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: ['27', 0] }, class_type: 'KSampler' },
+      '31': { inputs: { seed: Math.floor(Math.random() * 999999999999999), steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: referenceImage ? 0.35 : 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: referenceImage ? ['37', 0] : ['27', 0] }, class_type: 'KSampler' },
       '33': { inputs: { text: '', clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
       '35': { inputs: { guidance: 3.5, conditioning: ['6', 0] }, class_type: 'FluxGuidance' }
     };
-    const response = await fetch(`https://api.runpod.ai/v2/${endpoint}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { workflow } }) });
+    const imagePayload = referenceImage ? [{ name: 'reference.png', image: referenceImage.replace(/^data:image\/[^;]+;base64,/, '') }] : undefined;
+    if (referenceImage) { workflow['36'] = { inputs: { image: 'reference.png', upload: 'image' }, class_type: 'LoadImage' }; workflow['37'] = { inputs: { pixels: ['36', 0], vae: ['30', 2] }, class_type: 'VAEEncode' }; }
+    const response = await fetch(`https://api.runpod.ai/v2/${endpoint}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { workflow, ...(imagePayload ? { images: imagePayload } : {}) } }) });
     const data = await response.json();
     const image = data.output?.images?.[0]?.data || data.output?.message || data.output?.image || data.output?.image_url || data.output?.url;
     if (!response.ok || data.status === 'FAILED' || !image) return Response.json({ error: data.error || 'RunPod did not return an image. Your credit was not used.' }, { status: 502 });
