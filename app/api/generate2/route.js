@@ -10,13 +10,14 @@ export async function POST(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt } = await request.json();
+    const { prompt, style } = await request.json();
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
+    const finalPrompt = style && style !== 'None' ? `${style} style, ${prompt}` : prompt;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const { error: reserveError } = await db.rpc('reserve_generation_slot');
     if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
     const workflow = {
-      '6': { inputs: { text: prompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
+      '6': { inputs: { text: finalPrompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
       '8': { inputs: { samples: ['31', 0], vae: ['30', 2] }, class_type: 'VAEDecode' },
       '9': { inputs: { filename_prefix: 'Gabitor', images: ['8', 0] }, class_type: 'SaveImage' },
       '27': { inputs: { width: 512, height: 512, batch_size: 1 }, class_type: 'EmptySD3LatentImage' },
