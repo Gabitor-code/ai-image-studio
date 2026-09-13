@@ -12,7 +12,7 @@ export async function POST(request) {
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
     const { prompt, style, resolution = '768', quality = 'high', referenceImage } = await request.json();
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
-    const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Preserve the original subject, face, pose, body, and clothing exactly; only change the requested atmosphere or background. ' : ''}${prompt}`;
+    const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
     const steps = quality === 'standard' ? 16 : 28;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
@@ -24,7 +24,7 @@ export async function POST(request) {
       '9': { inputs: { filename_prefix: 'Gabitor', images: ['8', 0] }, class_type: 'SaveImage' },
       '27': { inputs: { width: size, height: size, batch_size: 1 }, class_type: 'EmptySD3LatentImage' },
       '30': { inputs: { ckpt_name: 'flux1-dev-fp8.safetensors' }, class_type: 'CheckpointLoaderSimple' },
-      '31': { inputs: { seed: Math.floor(Math.random() * 999999999999999), steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: referenceImage ? 0.35 : 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: referenceImage ? ['37', 0] : ['27', 0] }, class_type: 'KSampler' },
+      '31': { inputs: { seed: Math.floor(Math.random() * 999999999999999), steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: referenceImage ? 0.5 : 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: referenceImage ? ['37', 0] : ['27', 0] }, class_type: 'KSampler' },
       '33': { inputs: { text: '', clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
       '35': { inputs: { guidance: 3.5, conditioning: ['6', 0] }, class_type: 'FluxGuidance' }
     };
