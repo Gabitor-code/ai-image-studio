@@ -28,6 +28,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [resolution, setResolution] = useState('768');
   const [quality, setQuality] = useState('high');
+  const [style, setStyle] = useState('None');
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
@@ -91,7 +92,7 @@ export default function Home() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
-      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality }) });
+      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
       setImage(data.image);
@@ -121,7 +122,7 @@ export default function Home() {
         <button className={mode === 'video' ? 'mode active' : 'mode'} onClick={() => setMode('video')}><span>▷</span> Video</button>
       </div>
       <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'image' ? 'Example: An elegant perfume bottle in moonlight, on deep-blue marble...' : 'Example: A vintage sports car driving slowly through a sunlit Italian village...'} />
-      {showSettings && <div className="settings-panel"><label>Image size<select value={resolution} onChange={event => setResolution(event.target.value)}><option value="512">512 × 512</option><option value="768">768 × 768</option><option value="1024">1024 × 1024</option></select></label><label>Quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="standard">Standard</option><option value="high">High detail</option></select></label></div>}
+      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label><label>Image size<select value={resolution} onChange={event => setResolution(event.target.value)}><option value="512">512 × 512</option><option value="768">768 × 768</option><option value="1024">1024 × 1024</option></select></label><label>Quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="standard">Standard</option><option value="high">High detail</option></select></label></div>}
       <div className="card-bottom"><button className="settings" onClick={() => setShowSettings(!showSettings)}>✧ Settings {showSettings ? '↑' : '↓'}</button><button className="generate" disabled={generating} onClick={generate}>{generating ? 'Creating…' : <>Generate <span>→</span></>}</button></div>{notice && <p className="notice">{notice}</p>}{image && <div className="result-image"><img src={image} alt="Your Gabitor creation" /><a className="download-image" href={image} download="gabitor-creation.png">↓ Download image</a></div>}</div>
       <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? setNotice('Credit purchases will be available once payments are connected.') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
