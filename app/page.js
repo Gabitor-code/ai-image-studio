@@ -86,6 +86,18 @@ export default function Home() {
   }
 
   async function signOut() { await supabase?.auth.signOut(); setNotice('You have been signed out.'); }
+  async function buyCredits(plan) {
+    if (!user) { openSignup(); return; }
+    setNotice('Opening secure checkout…');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Please sign in again to purchase credits.');
+      const response = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ plan }) });
+      const data = await response.json();
+      if (!response.ok || !data.url) throw new Error(data.error || 'Unable to open checkout.');
+      window.location.assign(data.url);
+    } catch (error) { setNotice(error.message || 'Unable to open checkout.'); }
+  }
   function openSignup() { setAuthMode('signup'); setAuthMessage(''); setAuthOpen(true); }
   async function generate() {
     if (!user) { setAuthMode('signup'); setAuthMessage('Create an account to start generating.'); setAuthOpen(true); return; }
@@ -134,7 +146,7 @@ export default function Home() {
       <button className="gallery-button" onClick={() => setShowGallery(!showGallery)}>{showGallery ? 'Close gallery' : 'Open gallery'} <span>→</span></button>
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}><img src={creation.image} alt={creation.prompt} /><div><p>{creation.prompt}</p><a href={creation.image} download={`gabitor-${creation.id}.png`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
-    <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>50 credits</strong><span>AI image generations · Private creations · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>150 credits</strong><span>AI image generations · Best value · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>400 credits</strong><span>AI image generations · 20% more credits · No subscription</span><button onClick={() => setNotice('Payments will be available once Stripe is connected.')}>Choose Pro →</button></div></div></section>
+    <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>50 credits</strong><span>AI image generations · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>150 credits</strong><span>AI image generations · Best value · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>400 credits</strong><span>AI image generations · 20% more credits · No subscription</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
     <footer><a className="brand" href="#top"><span>✦</span> GABITOR</a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
     {authOpen && <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Account access"><form className="auth-card" onSubmit={submitAuth}>
       <button type="button" className="auth-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button><p className="eyebrow">GABITOR ACCOUNT</p>
