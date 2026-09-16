@@ -68,8 +68,18 @@ export async function POST(request) {
       : { workflow, ...(imagePayload ? { images: imagePayload } : {}) };
     const response = await fetch(`https://api.runpod.ai/v2/${referenceImage ? editEndpoint : endpoint}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: requestInput }) });
     const data = await response.json();
-    const image = data.output?.images?.[0]?.data || data.output?.images?.[0]?.image_url || data.output?.message || data.output?.image || data.output?.image_url || data.output?.url || data.output?.image_base64;
-    if (!response.ok || data.status === 'FAILED' || !image) return Response.json({ error: data.error || 'RunPod did not return an image. Your credit was not used.' }, { status: 502 });
+    const first = data.output?.images?.[0];
+    const image = first?.data || first?.image_url || first?.url || data.output?.message || data.output?.image || data.output?.image_url || data.output?.url || data.output?.image_base64;
+    if (!response.ok || data.status === 'FAILED' || !image) {
+      const workerError = data.error || data.output?.error || data.output?.message || data.output?.status || data.status;
+      console.error('generate2: RunPod edit response did not contain an image', {
+        httpStatus: response.status,
+        runpodStatus: data.status,
+        error: workerError,
+        outputKeys: data.output && typeof data.output === 'object' ? Object.keys(data.output) : [],
+      });
+      return Response.json({ error: workerError ? `RunPod image edit failed: ${workerError}` : 'RunPod did not return an image. Your credit was not used.' }, { status: 502 });
+    }
     const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
     if (creditError) return Response.json({ error: 'Your image was created, but we could not finalize the credit.' }, { status: 500 });
     return Response.json({ image: typeof image === 'string' && image.startsWith('data:') ? image : typeof image === 'string' && image.startsWith('http') ? image : `data:image/png;base64,${image}`, remainingCredits: creditData?.remaining_credits });
