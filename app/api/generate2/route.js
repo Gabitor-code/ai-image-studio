@@ -66,8 +66,8 @@ export async function POST(request) {
           : { prompt: finalPrompt, image: referenceUrl, seed: -1, output_format: 'png', enable_safety_checker: true })
         : { workflow, images: imagePayload }
       : { workflow, ...(imagePayload ? { images: imagePayload } : {}) };
-    const response = await fetch(`https://api.runpod.ai/v2/${referenceImage ? editEndpoint : endpoint}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: requestInput }) });
-    const data = await response.json();
+    const runpodEndpoint = referenceImage ? editEndpoint : endpoint;    const runpodHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey };    const response = await fetch(`https://api.runpod.ai/v2/${runpodEndpoint}/runsync`, { method: 'POST', headers: runpodHeaders, body: JSON.stringify({ input: requestInput }) });    let data = await response.json();    // A busy endpoint can return IN_QUEUE/IN_PROGRESS before the worker has produced output.    if (response.ok && (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') && data.id) {      const deadline = Date.now() + 45000;      while (Date.now() < deadline && (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS')) {        await new Promise(resolve => setTimeout(resolve, 2000));        const statusResponse = await fetch(`https://api.runpod.ai/v2/${runpodEndpoint}/status/${data.id}`, { headers: { Authorization: 'Bearer ' + apiKey } });        data = await statusResponse.json();      }    }
+    
     const first = data.output?.images?.[0];
     const image = first?.data || first?.image_url || first?.url || data.output?.message || data.output?.image || data.output?.image_url || data.output?.url || data.output?.image_base64;
     if (!response.ok || data.status === 'FAILED' || !image) {
