@@ -64,7 +64,7 @@ export async function POST(request) {
         ? (editEndpoint === 'qwen-image-edit-2511'
           ? { prompt: finalPrompt, images: [referenceUrl], seed: -1, size: `${size}*${size}`, output_format: 'png' }
           : { prompt: finalPrompt, image: referenceUrl, seed: -1, output_format: 'png', enable_safety_checker: true })
-        : { workflow: qwenWorkflow, images: imagePayload }
+        : { workflow, images: imagePayload }
       : { workflow, ...(imagePayload ? { images: imagePayload } : {}) };
     const response = await fetch(`https://api.runpod.ai/v2/${referenceImage ? editEndpoint : endpoint}/runsync`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: requestInput }) });
     const data = await response.json();
