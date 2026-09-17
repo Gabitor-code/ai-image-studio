@@ -21,7 +21,11 @@ export async function GET(request) {
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
     const response = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/status/${encodeURIComponent(jobId)}`, { headers: { Authorization: 'Bearer ' + apiKey } });
     const data = await readRunpodResponse(response);
-    if (!response.ok) return Response.json({ error: `RunPod video status failed: ${data.error || data.status || response.status}` }, { status: 502 });
+    if (!response.ok) {
+      const detail = data.error || data.message || data.detail || data.status || JSON.stringify(data);
+      console.error('video-status: RunPod status request failed', { httpStatus: response.status, jobId, detail });
+      return Response.json({ error: `RunPod video status failed: ${detail}` }, { status: 502 });
+    }
     if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') return Response.json({ pending: true, status: data.status }, { status: 202 });
     const video = data.output?.video_url || data.output?.video || data.video || data.output?.body?.video;
     if (data.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
