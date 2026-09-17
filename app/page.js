@@ -35,6 +35,13 @@ export default function Home() {
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
 
+  async function readApiResponse(response) {
+    const body = await response.text();
+    if (!body) return {};
+    try { return JSON.parse(body); }
+    catch { return { error: response.ok ? 'The server returned an invalid response.' : `Server error (${response.status}). Please try again shortly.` }; }
+  }
+
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
@@ -93,7 +100,7 @@ export default function Home() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to purchase credits.');
       const response = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ plan }) });
-      const data = await response.json();
+      const data = await readApiResponse(response);
       if (!response.ok || !data.url) throw new Error(data.error || 'Unable to open checkout.');
       window.location.assign(data.url);
     } catch (error) { setNotice(error.message || 'Unable to open checkout.'); }
@@ -102,19 +109,20 @@ export default function Home() {
   async function generate() {
     if (!user) { setAuthMode('signup'); setAuthMessage('Create an account to start generating.'); setAuthOpen(true); return; }
     if (!prompt.trim()) { setNotice('Start by writing a short description.'); return; }
-    if (mode === 'image-edit' && !referenceImage) { setNotice('Upload a reference image for image-to-image editing.'); return; }
+    if ((mode === 'image-edit' || mode === 'video') && !referenceImage) { setNotice(mode === 'video' ? 'Upload an image to create a video.' : 'Upload a reference image for image-to-image editing.'); return; }
     setGenerating(true); setImage(''); setNotice('Creating your image…');
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
-      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, referenceImage: mode === 'image-edit' ? referenceImage : '' }) });
-      const data = await response.json();
+      const apiPath = mode === 'image-edit' ? '/api/edit-image' : mode === 'video' ? '/api/generate-video' : '/api/generate-image';
+      const response = await fetch(apiPath, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, referenceImage: mode === 'image-edit' ? referenceImage : '' }) });
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
-      
+      setImage(mode === 'video' ? data.video : data.image);
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
-      const creation = { id: Date.now(), image: data.image, prompt: prompt.trim(), createdAt: new Date().toISOString() };
+      const creation = { id: Date.now(), image: mode === 'video' ? data.video : data.image, prompt: prompt.trim(), createdAt: new Date().toISOString(), kind: mode };
       setCreations(previous => { const next = [creation, ...previous].slice(0, 12); try { localStorage.setItem(`gabitor-creations-${user.id}`, JSON.stringify(next)); } catch {} return next; });
-      setNotice('Your image is ready.');
+      setNotice(mode === 'video' ? 'Your video is ready.' : 'Your image is ready.');
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
@@ -138,8 +146,8 @@ export default function Home() {
         <button className={mode === 'video' ? 'mode active' : 'mode'} onClick={() => setMode('video')}><span>▷</span> Video</button>
       </div>
       <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'image-edit' ? 'Example: Keep the product unchanged and place it in a cinematic Halloween scene...' : mode === 'image' ? 'Example: An elegant perfume bottle in moonlight, on deep-blue marble...' : 'Example: A vintage sports car driving slowly through a sunlit Italian village...'} />
-      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode === 'image-edit' && <div className="reference-field"><span>Reference image</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}</div>}<label>Image size<select value={resolution} onChange={event => setResolution(event.target.value)}><option value="512">512 × 512</option><option value="768">768 × 768</option><option value="1024">1024 × 1024</option></select></label><label>Quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="standard">Standard</option><option value="high">High detail</option></select></label></div>}
-      <div className="card-bottom"><button className="settings" onClick={() => setShowSettings(!showSettings)}>✧ Settings {showSettings ? '↑' : '↓'}</button><button className="generate" disabled={generating} onClick={generate}>{generating ? 'Creating…' : <>Generate <span>→</span></>}</button></div>{notice && <p className="notice">{notice}</p>}{image && <div className="result-image"><img src={image} alt="Your Gabitor creation" /><a className="download-image" href={image} download="gabitor-creation.png">↓ Download image</a></div>}</div>
+      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}</div>}<label>Image size<select value={resolution} onChange={event => setResolution(event.target.value)}><option value="512">512 × 512</option><option value="768">768 × 768</option><option value="1024">1024 × 1024</option></select></label><label>Quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="standard">Standard</option><option value="high">High detail</option></select></label></div>}
+      <div className="card-bottom"><button className="settings" onClick={() => setShowSettings(!showSettings)}>✧ Settings {showSettings ? '↑' : '↓'}</button><button className="generate" disabled={generating} onClick={generate}>{generating ? 'Creating…' : <>Generate <span>→</span></>}</button></div>{notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{mode === 'video' ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={image} download={mode === 'video' ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {mode === 'video' ? 'video' : 'image'}</a></div>}</div>
       <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
     <section id="gallery" className="gallery-section">
