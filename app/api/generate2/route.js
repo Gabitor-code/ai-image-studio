@@ -21,12 +21,16 @@ export async function POST(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt, style, resolution = '768', quality = 'high', referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
+    const { prompt, style, resolution = '768', quality = 'high', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
     if (!apiKey || (workflowMode === 'image' && !imageEndpoint) || (workflowMode === 'edit' && !editEndpoint) || (workflowMode === 'video' && !videoEndpoint)) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
+    const ratio = aspectRatio === '16:9' ? [size, Math.round(size * 9 / 16)] : aspectRatio === '9:16' ? [Math.round(size * 9 / 16), size] : [size, size];
+    const [width, height] = ratio;
     const steps = quality === 'standard' ? 16 : 28;
+    const safeSeed = Number.isFinite(Number(seed)) && Number(seed) >= 0 ? Number(seed) : Math.floor(Math.random() * 999999999999999);
+    const motionGuidance = motion === 'low' ? 3.5 : motion === 'high' ? 6.5 : 5;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const { error: reserveError } = await db.rpc('reserve_generation_slot');
     if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
@@ -34,11 +38,11 @@ export async function POST(request) {
       '6': { inputs: { text: finalPrompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
       '8': { inputs: { samples: ['31', 0], vae: ['30', 2] }, class_type: 'VAEDecode' },
       '9': { inputs: { filename_prefix: 'Gabitor', images: ['8', 0] }, class_type: 'SaveImage' },
-      '27': { inputs: { width: size, height: size, batch_size: 1 }, class_type: 'EmptySD3LatentImage' },
+      '27': { inputs: { width, height, batch_size: 1 }, class_type: 'EmptySD3LatentImage' },
       '30': { inputs: { ckpt_name: 'flux1-dev-fp8.safetensors' }, class_type: 'CheckpointLoaderSimple' },
       // Keep reference clothing/product details stable; only the requested scene should change.
-      '31': { inputs: { seed: Math.floor(Math.random() * 999999999999999), steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: referenceImage ? 0.3 : 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: referenceImage ? ['37', 0] : ['27', 0] }, class_type: 'KSampler' },
-      '33': { inputs: { text: '', clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
+      '31': { inputs: { seed: safeSeed, steps, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: referenceImage ? Math.min(0.95, Math.max(0.05, Number(referenceStrength))) : 1, model: ['30', 0], positive: ['35', 0], negative: ['33', 0], latent_image: referenceImage ? ['37', 0] : ['27', 0] }, class_type: 'KSampler' },
+      '33': { inputs: { text: negativePrompt, clip: ['30', 1] }, class_type: 'CLIPTextEncode' },
       '35': { inputs: { guidance: 3.5, conditioning: ['6', 0] }, class_type: 'FluxGuidance' }
     };
     const imagePayload = referenceImage ? [{ name: 'reference.png', image: referenceImage.replace(/^data:image\/[^;]+;base64,/, '') }] : undefined;
@@ -60,12 +64,12 @@ export async function POST(request) {
         prompt: finalPrompt,
         image: referenceUrl,
         negative_prompt: 'blurry, low quality, distorted, flicker, warped details',
-        size: '480*832',
+        size: `${aspectRatio === '16:9' ? '832*480' : aspectRatio === '1:1' ? '640*640' : '480*832'}`,
         num_inference_steps: 30,
-        guidance: 5,
-        duration: 5,
+        guidance: motionGuidance,
+        duration: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
         flow_shift: 5,
-        seed: -1,
+        seed: Number(seed) >= 0 ? Number(seed) : -1,
         enable_prompt_optimization: false,
         enable_safety_checker: true
       };
@@ -89,7 +93,7 @@ export async function POST(request) {
         ? (vllmOmniEditEndpoint
           ? { route: '/v1/images/edits', body: { prompt: finalPrompt, image_b64: [referenceImage.replace(/^data:image\/[^;]+;base64,/, '')] } }
           : editEndpoint === 'qwen-image-edit-2511'
-          ? { prompt: finalPrompt, images: [referenceUrl], seed: -1, size: `${size}*${size}`, output_format: 'png' }
+          ? { prompt: finalPrompt, images: [referenceUrl], seed: safeSeed, size: `${width}*${height}`, output_format: 'png' }
           : { prompt: finalPrompt, image_url: referenceUrl })
         : { workflow, images: imagePayload }
       : { workflow, ...(imagePayload ? { images: imagePayload } : {}) };
