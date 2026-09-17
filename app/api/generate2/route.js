@@ -74,8 +74,10 @@ export async function POST(request) {
         enable_safety_checker: true
       };
       const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: videoInput }) });
-      let videoData = await readRunpodResponse(videoResponse);
-      if (videoResponse.ok && videoData.id) { const deadline = Date.now() + 55000; while (Date.now() < deadline && (videoData.status === 'IN_QUEUE' || videoData.status === 'IN_PROGRESS')) { await new Promise(resolve => setTimeout(resolve, 2000)); const statusResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/status/${videoData.id}`, { headers: { Authorization: 'Bearer ' + apiKey } }); videoData = await readRunpodResponse(statusResponse); } }
+      const videoData = await readRunpodResponse(videoResponse);
+      if (videoResponse.ok && videoData.id && (videoData.status === 'IN_QUEUE' || videoData.status === 'IN_PROGRESS')) {
+        return Response.json({ pending: true, jobId: videoData.id, status: videoData.status }, { status: 202 });
+      }
       const video = videoData.output?.video_url || videoData.output?.video || videoData.video || videoData.output?.body?.video;
       if (!videoResponse.ok || videoData.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${videoData.error || videoData.output?.error || videoData.status || 'no video returned'}` }, { status: 502 });
       const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
