@@ -7,6 +7,21 @@ async function readRunpodResponse(response) {
   catch { return { status: `HTTP_${response.status}`, error: body.slice(0, 500) }; }
 }
 
+function extractVideo(value) {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:video/')) return value;
+    if (/^https?:\/\//i.test(value) && /\.(mp4|webm|mov)(\?|$)/i.test(value)) return value;
+    if (value.length > 100000) return value;
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'output', 'body', 'data']) {
+    const found = extractVideo(value[key]);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function GET(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -27,7 +42,7 @@ export async function GET(request) {
       return Response.json({ error: `RunPod video status failed: ${detail}` }, { status: 502 });
     }
     if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') return Response.json({ pending: true, status: data.status }, { status: 202 });
-    const video = data.output?.video_url || data.output?.video || data.video || data.output?.body?.video;
+    const video = extractVideo(data.output) || extractVideo(data.video);
     if (data.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
     const { data: creditData, error: creditError } = await supabase.rpc('complete_generation_credit');
     if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
