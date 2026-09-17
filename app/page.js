@@ -121,8 +121,20 @@ export default function Home() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
       const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'image-edit' ? 'edit' : 'image' }) });
-      const data = await readApiResponse(response);
-      if (!response.ok) throw new Error(data.error || 'Image generation failed.');
+      let data = await readApiResponse(response);
+      if (mode === 'video' && response.status === 202 && data.pending && data.jobId) {
+        const startedAt = Date.now();
+        setNotice('Video is queued. Waiting for an available worker…');
+        while (Date.now() - startedAt < 5 * 60 * 1000) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(data.jobId)}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+          data = await readApiResponse(statusResponse);
+          if (statusResponse.status === 202 && data.pending) { setNotice(data.status === 'IN_PROGRESS' ? 'Video is being generated…' : 'Video is still queued…'); continue; }
+          break;
+        }
+        if (!data.ready) throw new Error(data.error || 'The video is taking too long. Please try again later.');
+      }
+      if (!response.ok && !data.ready) throw new Error(data.error || 'Image generation failed.');
       setImage(mode === 'video' ? data.video : data.image);
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
       const creation = { id: Date.now(), image: mode === 'video' ? data.video : data.image, prompt: prompt.trim(), createdAt: new Date().toISOString(), kind: mode };
