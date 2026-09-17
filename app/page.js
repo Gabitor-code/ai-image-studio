@@ -114,8 +114,7 @@ export default function Home() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
-      const apiPath = mode === 'image-edit' ? '/api/edit-image' : mode === 'video' ? '/api/generate-video' : '/api/generate-image';
-      const response = await fetch(apiPath, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, referenceImage: mode === 'image-edit' ? referenceImage : '' }) });
+      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'image-edit' ? 'edit' : 'image' }) });
       const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
       setImage(mode === 'video' ? data.video : data.image);
