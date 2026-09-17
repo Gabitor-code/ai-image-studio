@@ -110,7 +110,7 @@ export default function Home() {
       const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, referenceImage: mode === 'image-edit' ? referenceImage : '' }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Image generation failed.');
-      setImage(data.image);
+      
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
       const creation = { id: Date.now(), image: data.image, prompt: prompt.trim(), createdAt: new Date().toISOString() };
       setCreations(previous => { const next = [creation, ...previous].slice(0, 12); try { localStorage.setItem(`gabitor-creations-${user.id}`, JSON.stringify(next)); } catch {} return next; });
