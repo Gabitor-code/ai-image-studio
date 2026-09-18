@@ -76,14 +76,12 @@ export async function POST(request) {
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
       const [videoWidth, videoHeight] = aspectRatio === '16:9' ? [832, 480] : aspectRatio === '9:16' ? [480, 832] : [640, 640];
+      void motionGuidance;
       const videoInput = {
         prompt: finalPrompt,
-        negative_prompt: 'blurry, low quality, distorted, flicker, warped details',
         size: `${videoWidth}x${videoHeight}`,
         seconds: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
         fps: 24,
-        num_inference_steps: 30,
-        guidance_scale: motionGuidance,
         seed: Number(seed) >= 0 ? Number(seed) : 42,
         image_reference: { image_url: referenceImage }
       };
