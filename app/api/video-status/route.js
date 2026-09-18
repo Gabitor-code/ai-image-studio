@@ -28,7 +28,7 @@ function extractVideo(value) {
     }
     return null;
   }
-  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'file', 'filename', 'video_base64', 'b64_json', 'output', 'body', 'data', 'result']) {
+  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'file', 'filename', 'video_base64', 'b64_json', 'data_b64', 'output', 'body', 'data', 'result']) {
     const found = extractVideo(value[key]);
     if (found) return found;
   }
