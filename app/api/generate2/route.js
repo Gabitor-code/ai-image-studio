@@ -77,7 +77,7 @@ export async function POST(request) {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
       const videoInput = {
         prompt: finalPrompt,
-        image_b64: [referenceImage.replace(/^data:image\/[^;]+;base64,/, '')],
+        image_b64: referenceImage.replace(/^data:image\/[^;]+;base64,/, ''),
         negative_prompt: 'blurry, low quality, distorted, flicker, warped details',
         size: `${aspectRatio === '16:9' ? '832*480' : aspectRatio === '1:1' ? '640*640' : '480*832'}`,
         num_inference_steps: 30,
