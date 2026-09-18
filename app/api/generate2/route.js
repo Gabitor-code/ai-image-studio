@@ -88,7 +88,7 @@ export async function POST(request) {
         enable_prompt_optimization: false,
         enable_safety_checker: true
       };
-      const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos/generations', body: videoInput } }) });
+      const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos', body: videoInput } }) });
       const videoData = await readRunpodResponse(videoResponse);
       if (videoResponse.ok && videoData.id && (videoData.status === 'IN_QUEUE' || videoData.status === 'IN_PROGRESS')) {
         return Response.json({ pending: true, jobId: videoData.id, status: videoData.status }, { status: 202 });
