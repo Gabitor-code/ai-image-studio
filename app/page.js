@@ -123,11 +123,11 @@ export default function Home() {
       const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'image-edit' ? 'edit' : 'image' }) });
       let data = await readApiResponse(response);
       if (mode === 'video' && response.status === 202 && data.pending && data.jobId) {
+        setNotice('Video is queued. Waiting for an available worker…');        const videoJobId = data.jobId;
         const startedAt = Date.now();
-        setNotice('Video is queued. Waiting for an available worker…');
         while (Date.now() - startedAt < 5 * 60 * 1000) {
           await new Promise(resolve => setTimeout(resolve, 5000));
-          const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(data.jobId)}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+          const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(videoJobId)}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
           data = await readApiResponse(statusResponse);
           if (statusResponse.status === 202 && data.pending) { setNotice(data.status === 'IN_PROGRESS' ? 'Video is being generated…' : 'Video is still queued…'); continue; }
           break;
