@@ -56,7 +56,10 @@ export async function GET(request) {
     }
     if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') return Response.json({ pending: true, status: data.status }, { status: 202 });
     const video = extractVideo(data) || extractVideo(data.output) || extractVideo(data.video);
-    if (data.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
+    if (data.status === 'FAILED' || !video) {
+      console.error('video-status: RUNPOD_RAW_OUTPUT_DEBUG', JSON.stringify({ jobId, runpodStatus: data.status, output: data.output, delayTime: data.delayTime, executionTime: data.executionTime, raw: data }).slice(0, 4000));
+      return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
+    }
     const { data: creditData, error: creditError } = await supabase.rpc('complete_generation_credit');
     if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
     const videoResult = video.startsWith('data:') || video.startsWith('http') ? video : `data:video/mp4;base64,${video}`;
