@@ -17,7 +17,7 @@ function extractVideo(value) {
     return null;
   }
   if (!value || typeof value !== 'object') return null;
-  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'output', 'body', 'data']) {
+  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'output', 'body', 'data', 'data_b64']) {
     const found = extractVideo(value[key]);
     if (found) return found;
   }
@@ -79,15 +79,15 @@ export async function POST(request) {
       const videoInput = {
         prompt: finalPrompt,
         negative_prompt: 'blurry, low quality, distorted, flicker, warped details',
-        input_reference: referenceImage.replace(/^data:image\/[^;]+;base64,/, ''),
-        width: videoWidth,
-        height: videoHeight,
+        size: `${videoWidth}x${videoHeight}`,
         seconds: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
+        fps: 24,
         num_inference_steps: 30,
         guidance_scale: motionGuidance,
-        seed: Number(seed) >= 0 ? Number(seed) : -1
+        seed: Number(seed) >= 0 ? Number(seed) : 42,
+        image_reference: { image_url: referenceImage }
       };
-      const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos', body: videoInput } }) });
+      const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos/sync', body: videoInput } }) });
       const videoData = await readRunpodResponse(videoResponse);
       if (videoResponse.ok && videoData.id && (videoData.status === 'IN_QUEUE' || videoData.status === 'IN_PROGRESS')) {
         return Response.json({ pending: true, jobId: videoData.id, status: videoData.status }, { status: 202 });
