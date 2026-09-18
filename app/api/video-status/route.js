@@ -46,6 +46,7 @@ export async function GET(request) {
     if (data.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
     const { data: creditData, error: creditError } = await supabase.rpc('complete_generation_credit');
     if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
-    return Response.json({ ready: true, video: video.startsWith('data:') ? video : `data:video/mp4;base64,${video}`, remainingCredits: creditData?.remaining_credits });
+    const videoResult = video.startsWith('data:') || video.startsWith('http') ? video : `data:video/mp4;base64,${video}`;
+    return Response.json({ ready: true, video: videoResult, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to check the video right now.' }, { status: 500 }); }
 }
