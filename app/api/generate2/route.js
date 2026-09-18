@@ -75,18 +75,17 @@ export async function POST(request) {
     }
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
+      const [videoWidth, videoHeight] = aspectRatio === '16:9' ? [832, 480] : aspectRatio === '9:16' ? [480, 832] : [640, 640];
       const videoInput = {
         prompt: finalPrompt,
-        image_b64: referenceImage.replace(/^data:image\/[^;]+;base64,/, ''),
         negative_prompt: 'blurry, low quality, distorted, flicker, warped details',
-        size: `${aspectRatio === '16:9' ? '832*480' : aspectRatio === '1:1' ? '640*640' : '480*832'}`,
+        input_reference: referenceImage.replace(/^data:image\/[^;]+;base64,/, ''),
+        width: videoWidth,
+        height: videoHeight,
+        seconds: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
         num_inference_steps: 30,
-        guidance: motionGuidance,
-        duration: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
-        flow_shift: 5,
-        seed: Number(seed) >= 0 ? Number(seed) : -1,
-        enable_prompt_optimization: false,
-        enable_safety_checker: true
+        guidance_scale: motionGuidance,
+        seed: Number(seed) >= 0 ? Number(seed) : -1
       };
       const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos', body: videoInput } }) });
       const videoData = await readRunpodResponse(videoResponse);
