@@ -10,12 +10,12 @@ async function readRunpodResponse(response) {
 function extractVideo(value) {
   if (typeof value === 'string') {
     if (value.startsWith('data:video/')) return value;
-    if (/^https?:\/\//i.test(value) && /\.(mp4|webm|mov)(\?|$)/i.test(value)) return value;
+    if (/^https?:\/\//i.test(value)) return value;
     if (value.length > 100000) return value;
     return null;
   }
   if (!value || typeof value !== 'object') return null;
-  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'output', 'body', 'data']) {
+  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'file', 'filename', 'video_base64', 'b64_json', 'output', 'body', 'data', 'result']) {
     const found = extractVideo(value[key]);
     if (found) return found;
   }
@@ -34,8 +34,6 @@ export async function GET(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    // RunPod job IDs are already URL-safe (UUID or sync-* form). Keep the
-    // provider's exact identifier in the path so its format validator sees it.
     const response = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/status/${jobId}`, { headers: { Authorization: 'Bearer ' + apiKey } });
     const data = await readRunpodResponse(response);
     if (!response.ok) {
