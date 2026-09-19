@@ -58,7 +58,13 @@ export async function GET(request) {
     const video = extractVideo(data) || extractVideo(data.output) || extractVideo(data.video);
     if (data.status === 'FAILED' || !video) {
       console.error('video-status: RUNPOD_RAW_OUTPUT_DEBUG', JSON.stringify({ jobId, runpodStatus: data.status, output: data.output, delayTime: data.delayTime, executionTime: data.executionTime, raw: data }).slice(0, 4000));
-      return Response.json({ error: `RunPod video generation failed: ${data.error || data.output?.error || data.status || 'no video returned'}` }, { status: 502 });
+      // A completed-but-empty output like {"status":400} means the omni server
+      // rejected the request body; RunPod's own job-done submission drops the
+      // real validation message in that case, so surface the HTTP status we do
+      // have instead of the misleading outer job status ("COMPLETED").
+      const upstreamStatus = data.output && typeof data.output === 'object' ? data.output.status : undefined;
+      const detail = data.error || data.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : data.status) || 'no video returned';
+      return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
     }
     const { data: creditData, error: creditError } = await supabase.rpc('complete_generation_credit');
     if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
