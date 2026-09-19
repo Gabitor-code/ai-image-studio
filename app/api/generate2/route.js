@@ -146,7 +146,14 @@ export async function POST(request) {
         num_frames: Math.round(videoSeconds * videoFps),
         fps: videoFps,
         seed: Number(seed) >= 0 ? Number(seed) : 42,
-        image_reference: { image_url: referenceImage }
+        // Send the already-uploaded HTTPS URL, not the raw data: URL. The
+        // full-resolution photo's base64 text can run into the multipart
+        // form-field size limit the omni server enforces per field, which
+        // silently rejects the request with an empty-detail HTTP 400 (the
+        // "the video model rejected the request" error the user keeps
+        // seeing). A short https:// URL avoids that entirely, and the model
+        // server already knows how to fetch image_reference.image_url itself.
+        image_reference: { image_url: referenceUrl }
       };
       const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos/sync', body: videoInput } }) });
       const videoData = await readRunpodResponse(videoResponse);
