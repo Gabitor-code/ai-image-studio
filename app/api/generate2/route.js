@@ -24,6 +24,59 @@ function extractVideo(value) {
   return null;
 }
 
+// Reads real pixel width/height from an image buffer (PNG/JPEG/WEBP) so the
+// video request can send a size that actually matches the uploaded photo,
+// instead of guessing from the UI's aspect-ratio dropdown.
+function getImageDimensions(buffer) {
+  try {
+    if (buffer.length >= 24 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+      return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+    }
+    if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+      let offset = 2;
+      while (offset + 9 < buffer.length) {
+        if (buffer[offset] !== 0xff) { offset++; continue; }
+        const marker = buffer[offset + 1];
+        if (marker === 0xd8 || marker === 0xd9) { offset += 2; continue; }
+        if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue; }
+        const length = buffer.readUInt16BE(offset + 2);
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+        }
+        offset += 2 + length;
+      }
+    }
+    if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+      const fmt = buffer.toString('ascii', 12, 16);
+      if (fmt === 'VP8X') {
+        return {
+          width: (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16)) + 1,
+          height: (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16)) + 1
+        };
+      }
+      if (fmt === 'VP8 ') {
+        return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Wan2.2 video generation expects a "size" whose area matches its 480p tier
+// and whose aspect ratio matches the reference image; a mismatched size (e.g.
+// a hardcoded square) is a likely cause of a silent validation rejection.
+function videoSizeFor(referenceBytes, aspectRatio) {
+  const dims = referenceBytes ? getImageDimensions(referenceBytes) : null;
+  if (dims && dims.width > 0 && dims.height > 0) {
+    const targetArea = 832 * 480;
+    const arRatio = dims.width / dims.height;
+    const width = Math.max(16, Math.round(Math.sqrt(targetArea * arRatio) / 16) * 16);
+    const height = Math.max(16, Math.round(Math.sqrt(targetArea / arRatio) / 16) * 16);
+    return [width, height];
+  }
+  return aspectRatio === '16:9' ? [832, 480] : aspectRatio === '9:16' ? [480, 832] : [832, 480];
+}
+
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -63,19 +116,21 @@ export async function POST(request) {
     const imagePayload = referenceImage ? [{ name: 'reference.png', image: referenceImage.replace(/^data:image\/[^;]+;base64,/, '') }] : undefined;
     if (referenceImage) { workflow['36'] = { inputs: { image: 'reference.png', upload: 'image' }, class_type: 'LoadImage' }; workflow['37'] = { inputs: { pixels: ['36', 0], vae: ['30', 2] }, class_type: 'VAEEncode' }; }
     let referenceUrl = referenceImage;
+    let referenceBytes;
     if (referenceImage?.startsWith('data:image/')) {
       const match = referenceImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
       if (!match) return Response.json({ error: 'The reference image format is invalid.' }, { status: 400 });
       const ext = match[1].split('/')[1].replace('jpeg', 'jpg');
       const path = `${user.id}/${Date.now()}.${ext}`;
       const bytes = Buffer.from(match[2], 'base64');
+      referenceBytes = bytes;
       const { error: uploadError } = await db.storage.from('references').upload(path, bytes, { contentType: match[1], upsert: false });
       if (uploadError) return Response.json({ error: 'Reference image storage is not configured yet. Please create a public “references” bucket in Supabase.' }, { status: 503 });
       referenceUrl = db.storage.from('references').getPublicUrl(path).data.publicUrl;
     }
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
-      const [videoWidth, videoHeight] = aspectRatio === '16:9' ? [832, 480] : aspectRatio === '9:16' ? [480, 832] : [640, 640];
+      const [videoWidth, videoHeight] = videoSizeFor(referenceBytes, aspectRatio);
       void motionGuidance;
       const videoInput = {
         prompt: finalPrompt,
