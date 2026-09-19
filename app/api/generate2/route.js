@@ -132,11 +132,19 @@ export async function POST(request) {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
       const [videoWidth, videoHeight] = videoSizeFor(referenceBytes, aspectRatio);
       void motionGuidance;
+      // This endpoint runs the Lightning-distilled Wan2.2 checkpoint, whose native
+      // output cadence is 16 fps / ~81 frames (~5s). The vLLM-Omni Videos API docs
+      // show fps as a model-dependent default; sending 24 (a value this fast
+      // checkpoint was never distilled for) is a likely cause of a silent
+      // validation rejection, so lock fps to the model's real rate and derive
+      // num_frames from it instead of leaving fps mismatched with duration.
+      const videoFps = 16;
+      const videoSeconds = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
       const videoInput = {
         prompt: finalPrompt,
         size: `${videoWidth}x${videoHeight}`,
-        seconds: [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5,
-        fps: 24,
+        num_frames: Math.round(videoSeconds * videoFps),
+        fps: videoFps,
         seed: Number(seed) >= 0 ? Number(seed) : 42,
         image_reference: { image_url: referenceImage }
       };
@@ -146,7 +154,15 @@ export async function POST(request) {
         return Response.json({ pending: true, jobId: videoData.id, status: videoData.status }, { status: 202 });
       }
       const video = extractVideo(videoData.output) || extractVideo(videoData.video);
-      if (!videoResponse.ok || videoData.status === 'FAILED' || !video) return Response.json({ error: `RunPod video generation failed: ${videoData.error || videoData.output?.error || videoData.status || 'no video returned'}` }, { status: 502 });
+      if (!videoResponse.ok || videoData.status === 'FAILED' || !video) {
+        // A completed-but-empty output like {"status":400} means the omni server
+        // rejected the request body; RunPod's own job-done submission drops the
+        // real validation message in that case, so surface the HTTP status we do
+        // have instead of the misleading outer job status ("COMPLETED").
+        const upstreamStatus = videoData.output && typeof videoData.output === 'object' ? videoData.output.status : undefined;
+        const detail = videoData.error || videoData.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : videoData.status) || 'no video returned';
+        return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
+      }
       const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
       if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
       return Response.json({ video: video.startsWith('data:') ? video : `data:video/mp4;base64,${video}`, remainingCredits: creditData?.remaining_credits });
