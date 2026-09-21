@@ -170,9 +170,15 @@ export async function POST(request) {
         const detail = videoData.error || videoData.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : videoData.status) || 'no video returned';
         return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
       }
+      const videoResult = video.startsWith('data:') ? video : `data:video/mp4;base64,${video}`;
       const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
-      if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
-      return Response.json({ video: video.startsWith('data:') ? video : `data:video/mp4;base64,${video}`, remainingCredits: creditData?.remaining_credits });
+      if (creditError) {
+        // Never throw away a video that RunPod already generated (and was
+        // already paid for) just because the credit bookkeeping call failed.
+        console.error('generate2: complete_generation_credit failed', creditError);
+        return Response.json({ video: videoResult, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
+      }
+      return Response.json({ video: videoResult, remainingCredits: creditData?.remaining_credits });
     }
     // Qwen Hub endpoints use a simple {prompt,image_url} contract. Keep this
     // provider switch explicit so an endpoint ID can be any generated UUID.
@@ -217,8 +223,14 @@ export async function POST(request) {
       });
       return Response.json({ error: workerError ? `RunPod image edit failed: ${workerError}` : 'RunPod did not return an image. Your credit was not used.' }, { status: 502 });
     }
+    const imageResult = typeof image === 'string' && image.startsWith('data:') ? image : typeof image === 'string' && image.startsWith('http') ? image : `data:image/png;base64,${image}`;
     const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
-    if (creditError) return Response.json({ error: 'Your image was created, but we could not finalize the credit.' }, { status: 500 });
-    return Response.json({ image: typeof image === 'string' && image.startsWith('data:') ? image : typeof image === 'string' && image.startsWith('http') ? image : `data:image/png;base64,${image}`, remainingCredits: creditData?.remaining_credits });
+    if (creditError) {
+      // Same as the video path: don't throw away a result that was already
+      // generated (and paid for) just because the credit bookkeeping failed.
+      console.error('generate2: complete_generation_credit failed', creditError);
+      return Response.json({ image: imageResult, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
+    }
+    return Response.json({ image: imageResult, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to generate an image right now. Your credit was not used.' }, { status: 500 }); }
 }
