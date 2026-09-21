@@ -28,7 +28,7 @@ export async function POST(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt, style, resolution = '768', quality = 'high', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
+    const { prompt, style, resolution = '768', quality = 'high', videoResolution = '720p', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
     if ((workflowMode === 'image' && !imageEndpoint) || (workflowMode === 'edit' && !editEndpoint) || (workflowMode === 'video' && !falKey) || (workflowMode !== 'video' && !apiKey)) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
@@ -71,10 +71,12 @@ export async function POST(request) {
       // aspect ratio ('auto' is the only supported value here) - same
       // end result as before, just something the model does for us now
       // instead of us computing a pixel size ourselves.
-      // "Quality" maps to output resolution, the real lever this API exposes
-      // (720p standard / 1080p high) - a genuine upgrade over the ~480p tier
-      // ceiling of the old self-hosted Lightning checkpoint.
-      const videoResolution = quality === 'standard' ? '720p' : '1080p';
+      // fal.ai's Seedance 2.5 image-to-video endpoint only supports 480p and
+      // 720p (confirmed directly on fal's own model page - unlike Seedance
+      // 2.0, this model does NOT offer 1080p or 4K), so the frontend now
+      // sends the real resolution string directly instead of an abstract
+      // "standard/high" quality tier.
+      const resolutionValue = ['480p', '720p'].includes(videoResolution) ? videoResolution : '720p';
       // This model has no dedicated "motion strength" or negative-prompt
       // field, so both settings get folded into the prompt text itself
       // instead of being silently dropped like they were on the old
@@ -84,7 +86,7 @@ export async function POST(request) {
       const videoInput = {
         prompt: videoPrompt,
         image_url: referenceUrl,
-        resolution: videoResolution,
+        resolution: resolutionValue,
         duration: String(videoSeconds),
         aspect_ratio: 'auto',
         generate_audio: false
