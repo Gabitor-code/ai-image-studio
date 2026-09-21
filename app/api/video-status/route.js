@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-async function readRunpodResponse(response) {
+// Must match the model id used to submit the job in generate2/route.js.
+const FAL_MODEL = 'bytedance/seedance-2.5/image-to-video';
+
+async function readFalResponse(response) {
   const body = await response.text();
   if (!body) return { status: response.ok ? undefined : `HTTP_${response.status}` };
   try { return JSON.parse(body); }
@@ -10,17 +13,11 @@ async function readRunpodResponse(response) {
 function extractVideo(value) {
   if (typeof value === 'string') {
     if (value.startsWith('data:video/')) return value;
-    if (/^https?:\/\//i.test(value)) return value
+    if (/^https?:\/\//i.test(value)) return value;
     if (value.length > 100000) return value;
     return null;
-  }  if (!value || typeof value !== 'object') return null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = extractVideo(item);
-      if (found) return found;
-    }
-    return null;
   }
+  if (!value || typeof value !== 'object') return null;
   if (Array.isArray(value)) {
     for (const item of value) {
       const found = extractVideo(item);
@@ -40,46 +37,46 @@ export async function GET(request) {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    const apiKey = process.env.RUNPOD_API_KEY;
-    const videoEndpoint = process.env.RUNPOD_VIDEO_ENDPOINT_ID;
+    const falKey = process.env.FAL_KEY;
     const jobId = new URL(request.url).searchParams.get('jobId')?.trim().replace(/^['"]|['"]$/g, '');
-    if (!token || !url || !anon || !apiKey || !videoEndpoint || !jobId) return Response.json({ error: 'Video status is not configured.' }, { status: 400 });
+    if (!token || !url || !anon || !falKey || !jobId) return Response.json({ error: 'Video status is not configured.' }, { status: 400 });
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
     // The RPC call below must run as the signed-in user (it looks up their row
-    // via auth.uid()), so it needs a client carrying their JWT — the plain
+    // via auth.uid()), so it needs a client carrying their JWT - the plain
     // `supabase` client above only has the anon key and runs as the anonymous
     // role, which was silently failing the credit RPC on every completed video.
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
-    const response = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/status/${jobId}`, { headers: { Authorization: 'Bearer ' + apiKey } });
-    const data = await readRunpodResponse(response);
-    if (!response.ok) {
-      const detail = data.error || data.message || data.detail || data.status || JSON.stringify(data);
-      console.error('video-status: RunPod status request failed', { httpStatus: response.status, jobId, detail });
-      return Response.json({ error: `RunPod video status failed: ${detail}` }, { status: 502 });
+    const falHeaders = { Authorization: 'Key ' + falKey };
+    const statusResponse = await fetch(`https://queue.fal.run/${FAL_MODEL}/requests/${jobId}/status`, { headers: falHeaders });
+    const statusData = await readFalResponse(statusResponse);
+    if (!statusResponse.ok) {
+      const detail = statusData.error || statusData.detail || statusData.status || JSON.stringify(statusData);
+      console.error('video-status: fal status request failed', { httpStatus: statusResponse.status, jobId, detail });
+      return Response.json({ error: `fal.ai video status failed: ${detail}` }, { status: 502 });
     }
-    if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') return Response.json({ pending: true, status: data.status }, { status: 202 });
-    const video = extractVideo(data) || extractVideo(data.output) || extractVideo(data.video);
-    if (data.status === 'FAILED' || !video) {
-      console.error('video-status: RUNPOD_RAW_OUTPUT_DEBUG', JSON.stringify({ jobId, runpodStatus: data.status, output: data.output, delayTime: data.delayTime, executionTime: data.executionTime, raw: data }).slice(0, 4000));
-      // A completed-but-empty output like {"status":400} means the omni server
-      // rejected the request body; RunPod's own job-done submission drops the
-      // real validation message in that case, so surface the HTTP status we do
-      // have instead of the misleading outer job status ("COMPLETED").
-      const upstreamStatus = data.output && typeof data.output === 'object' ? data.output.status : undefined;
-      const detail = data.error || data.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : data.status) || 'no video returned';
-      return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
+    if (statusData.status === 'IN_QUEUE' || statusData.status === 'IN_PROGRESS') return Response.json({ pending: true, status: statusData.status }, { status: 202 });
+    if (statusData.status !== 'COMPLETED') {
+      console.error('video-status: FAL_RAW_STATUS_DEBUG', JSON.stringify({ jobId, statusData }).slice(0, 4000));
+      return Response.json({ error: `fal.ai video generation failed: ${statusData.status || statusData.error || 'unknown status'}` }, { status: 502 });
     }
-    const videoResult = video.startsWith('data:') || video.startsWith('http') ? video : `data:video/mp4;base64,${video}`;
+    const resultResponse = await fetch(`https://queue.fal.run/${FAL_MODEL}/requests/${jobId}`, { headers: falHeaders });
+    const resultData = await readFalResponse(resultResponse);
+    const video = extractVideo(resultData);
+    if (!resultResponse.ok || !video) {
+      console.error('video-status: FAL_RAW_OUTPUT_DEBUG', JSON.stringify({ jobId, raw: resultData }).slice(0, 4000));
+      const detail = resultData.error || resultData.detail || 'no video returned';
+      return Response.json({ error: `fal.ai video generation failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
+    }
     const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
     if (creditError) {
-      // The video generated successfully and RunPod was already paid for it -
+      // The video generated successfully and fal.ai was already paid for it -
       // never throw that away just because the credit bookkeeping failed.
       // Show the user their video and only warn about the credit separately.
       console.error('video-status: complete_generation_credit failed', { jobId, creditError });
-      return Response.json({ ready: true, video: videoResult, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
+      return Response.json({ ready: true, video, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
     }
-    return Response.json({ ready: true, video: videoResult, remainingCredits: creditData?.remaining_credits });
+    return Response.json({ ready: true, video, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to check the video right now.' }, { status: 500 }); }
 }
