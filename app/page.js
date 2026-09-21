@@ -125,7 +125,11 @@ export default function Home() {
       if (mode === 'video' && response.status === 202 && data.pending && data.jobId) {
         setNotice('Video is queued. Waiting for an available worker…');        const videoJobId = data.jobId;
         const startedAt = Date.now();
-        while (Date.now() - startedAt < 5 * 60 * 1000) {
+        // 9 minutes: a cold RunPod worker can take 1-3 minutes just to spin up
+        // and load the model before generation even starts, so 5 minutes was
+        // giving up on jobs that went on to finish successfully (and had
+        // already been billed for) a minute later.
+        while (Date.now() - startedAt < 9 * 60 * 1000) {
           await new Promise(resolve => setTimeout(resolve, 5000));
           const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(videoJobId)}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
           data = await readApiResponse(statusResponse);
@@ -139,7 +143,7 @@ export default function Home() {
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
       const creation = { id: Date.now(), image: mode === 'video' ? data.video : data.image, prompt: prompt.trim(), createdAt: new Date().toISOString(), kind: mode };
       setCreations(previous => { const next = [creation, ...previous].slice(0, 12); try { localStorage.setItem(`gabitor-creations-${user.id}`, JSON.stringify(next)); } catch {} return next; });
-      setNotice(mode === 'video' ? 'Your video is ready.' : 'Your image is ready.');
+      setNotice(data.creditWarning || (mode === 'video' ? 'Your video is ready.' : 'Your image is ready.'));
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
