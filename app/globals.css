@@ -25,5 +25,6 @@
 .settings-panel>label,.settings-panel .reference-field{min-width:0;display:grid;grid-template-columns:1fr;align-items:start;gap:6px}
 .settings-panel select,.settings-panel input:not([type=file]){width:100%;min-width:0;max-width:100%;font:inherit}
 .settings-panel .reference-field{grid-column:span 2}
+.settings-panel p.hint{grid-column:1/-1;margin:0;color:#8b90a1;font-size:11px}
 @media(max-width:900px){.settings-panel{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-panel .reference-field{grid-column:span 2}}
 @media(max-width:560px){.settings-panel{grid-template-columns:1fr}.settings-panel .reference-field{grid-column:span 1}}
