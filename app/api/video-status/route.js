@@ -47,6 +47,11 @@ export async function GET(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
+    // The RPC call below must run as the signed-in user (it looks up their row
+    // via auth.uid()), so it needs a client carrying their JWT — the plain
+    // `supabase` client above only has the anon key and runs as the anonymous
+    // role, which was silently failing the credit RPC on every completed video.
+    const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const response = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/status/${jobId}`, { headers: { Authorization: 'Bearer ' + apiKey } });
     const data = await readRunpodResponse(response);
     if (!response.ok) {
@@ -66,9 +71,15 @@ export async function GET(request) {
       const detail = data.error || data.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : data.status) || 'no video returned';
       return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
     }
-    const { data: creditData, error: creditError } = await supabase.rpc('complete_generation_credit');
-    if (creditError) return Response.json({ error: 'Your video was created, but we could not finalize the credit.' }, { status: 500 });
     const videoResult = video.startsWith('data:') || video.startsWith('http') ? video : `data:video/mp4;base64,${video}`;
+    const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
+    if (creditError) {
+      // The video generated successfully and RunPod was already paid for it -
+      // never throw that away just because the credit bookkeeping failed.
+      // Show the user their video and only warn about the credit separately.
+      console.error('video-status: complete_generation_credit failed', { jobId, creditError });
+      return Response.json({ ready: true, video: videoResult, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
+    }
     return Response.json({ ready: true, video: videoResult, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to check the video right now.' }, { status: 500 }); }
 }
