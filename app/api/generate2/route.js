@@ -2,79 +2,14 @@ import { createClient } from '@supabase/supabase-js';
 
 export const maxDuration = 60;
 
-async function readRunpodResponse(response) {
+// Shared by the RunPod (image/edit) and fal.ai (video) providers below - both
+// return plain JSON bodies, and this keeps a bad/non-JSON error body from
+// throwing before we get a chance to report it.
+async function readJsonResponse(response) {
   const body = await response.text();
   if (!body) return { status: response.ok ? undefined : `HTTP_${response.status}` };
   try { return JSON.parse(body); }
   catch { return { status: `HTTP_${response.status}`, error: body.slice(0, 500) }; }
-}
-
-function extractVideo(value) {
-  if (typeof value === 'string') {
-    if (value.startsWith('data:video/')) return value;
-    if (/^https?:\/\//i.test(value) && /\.(mp4|webm|mov)(\?|$)/i.test(value)) return value;
-    if (value.length > 100000) return value;
-    return null;
-  }
-  if (!value || typeof value !== 'object') return null;
-  for (const key of ['video_url', 'videoUrl', 'video', 'url', 'output', 'body', 'data', 'data_b64']) {
-    const found = extractVideo(value[key]);
-    if (found) return found;
-  }
-  return null;
-}
-
-// Reads real pixel width/height from an image buffer (PNG/JPEG/WEBP) so the
-// video request can send a size that actually matches the uploaded photo,
-// instead of guessing from the UI's aspect-ratio dropdown.
-function getImageDimensions(buffer) {
-  try {
-    if (buffer.length >= 24 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-      return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-    }
-    if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
-      let offset = 2;
-      while (offset + 9 < buffer.length) {
-        if (buffer[offset] !== 0xff) { offset++; continue; }
-        const marker = buffer[offset + 1];
-        if (marker === 0xd8 || marker === 0xd9) { offset += 2; continue; }
-        if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue; }
-        const length = buffer.readUInt16BE(offset + 2);
-        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-          return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
-        }
-        offset += 2 + length;
-      }
-    }
-    if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
-      const fmt = buffer.toString('ascii', 12, 16);
-      if (fmt === 'VP8X') {
-        return {
-          width: (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16)) + 1,
-          height: (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16)) + 1
-        };
-      }
-      if (fmt === 'VP8 ') {
-        return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
-      }
-    }
-  } catch {}
-  return null;
-}
-
-// Wan2.2 video generation expects a "size" whose area matches its 480p tier
-// and whose aspect ratio matches the reference image; a mismatched size (e.g.
-// a hardcoded square) is a likely cause of a silent validation rejection.
-function videoSizeFor(referenceBytes, aspectRatio) {
-  const dims = referenceBytes ? getImageDimensions(referenceBytes) : null;
-  if (dims && dims.width > 0 && dims.height > 0) {
-    const targetArea = 832 * 480;
-    const arRatio = dims.width / dims.height;
-    const width = Math.max(16, Math.round(Math.sqrt(targetArea * arRatio) / 16) * 16);
-    const height = Math.max(16, Math.round(Math.sqrt(targetArea / arRatio) / 16) * 16);
-    return [width, height];
-  }
-  return aspectRatio === '16:9' ? [832, 480] : aspectRatio === '9:16' ? [480, 832] : [832, 480];
 }
 
 export async function POST(request) {
@@ -83,14 +18,18 @@ export async function POST(request) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL, anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
     const apiKey = process.env.RUNPOD_API_KEY, endpoint = process.env.RUNPOD_ENDPOINT_ID;
     const imageEndpoint = process.env.RUNPOD_IMAGE_ENDPOINT_ID || endpoint;
-    const videoEndpoint = process.env.RUNPOD_VIDEO_ENDPOINT_ID;
     const editEndpoint = process.env.RUNPOD_EDIT_ENDPOINT_ID;
+    // Video generation moved off RunPod onto fal.ai's hosted Seedance 2.5
+    // (better motion/detail quality than the self-hosted Lightning-distilled
+    // Wan2.2 checkpoint, and no GPU worker for us to run or pay cold-start
+    // time on). Image and image-edit still run on our own RunPod endpoints.
+    const falKey = process.env.FAL_KEY;
     if (!token || !url || !anon) return Response.json({ error: 'Please sign in to create an image.' }, { status: 401 });
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
     const { prompt, style, resolution = '768', quality = 'high', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
-    if (!apiKey || (workflowMode === 'image' && !imageEndpoint) || (workflowMode === 'edit' && !editEndpoint) || (workflowMode === 'video' && !videoEndpoint)) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
+    if ((workflowMode === 'image' && !imageEndpoint) || (workflowMode === 'edit' && !editEndpoint) || (workflowMode === 'video' && !falKey) || (workflowMode !== 'video' && !apiKey)) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
@@ -98,7 +37,6 @@ export async function POST(request) {
     const [width, height] = ratio;
     const steps = quality === 'standard' ? 16 : 28;
     const safeSeed = Number.isFinite(Number(seed)) && Number(seed) >= 0 ? Number(seed) : Math.floor(Math.random() * 999999999999999);
-    const motionGuidance = motion === 'low' ? 3.5 : motion === 'high' ? 6.5 : 5;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const { error: reserveError } = await db.rpc('reserve_generation_slot');
     if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
@@ -116,69 +54,51 @@ export async function POST(request) {
     const imagePayload = referenceImage ? [{ name: 'reference.png', image: referenceImage.replace(/^data:image\/[^;]+;base64,/, '') }] : undefined;
     if (referenceImage) { workflow['36'] = { inputs: { image: 'reference.png', upload: 'image' }, class_type: 'LoadImage' }; workflow['37'] = { inputs: { pixels: ['36', 0], vae: ['30', 2] }, class_type: 'VAEEncode' }; }
     let referenceUrl = referenceImage;
-    let referenceBytes;
     if (referenceImage?.startsWith('data:image/')) {
       const match = referenceImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
       if (!match) return Response.json({ error: 'The reference image format is invalid.' }, { status: 400 });
       const ext = match[1].split('/')[1].replace('jpeg', 'jpg');
       const path = `${user.id}/${Date.now()}.${ext}`;
       const bytes = Buffer.from(match[2], 'base64');
-      referenceBytes = bytes;
       const { error: uploadError } = await db.storage.from('references').upload(path, bytes, { contentType: match[1], upsert: false });
-      if (uploadError) return Response.json({ error: 'Reference image storage is not configured yet. Please create a public “references” bucket in Supabase.' }, { status: 503 });
+      if (uploadError) return Response.json({ error: 'Reference image storage is not configured yet. Please create a public "references" bucket in Supabase.' }, { status: 503 });
       referenceUrl = db.storage.from('references').getPublicUrl(path).data.publicUrl;
     }
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
-      const [videoWidth, videoHeight] = videoSizeFor(referenceBytes, aspectRatio);
-      void motionGuidance;
-      // This endpoint runs the Lightning-distilled Wan2.2 checkpoint, whose native
-      // output cadence is 16 fps / ~81 frames (~5s). The vLLM-Omni Videos API docs
-      // show fps as a model-dependent default; sending 24 (a value this fast
-      // checkpoint was never distilled for) is a likely cause of a silent
-      // validation rejection, so lock fps to the model's real rate and derive
-      // num_frames from it instead of leaving fps mismatched with duration.
-      const videoFps = 16;
       const videoSeconds = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
+      // Seedance 2.5 image-to-video always follows the uploaded photo's own
+      // aspect ratio ('auto' is the only supported value here) - same
+      // end result as before, just something the model does for us now
+      // instead of us computing a pixel size ourselves.
+      // "Quality" maps to output resolution, the real lever this API exposes
+      // (720p standard / 1080p high) - a genuine upgrade over the ~480p tier
+      // ceiling of the old self-hosted Lightning checkpoint.
+      const videoResolution = quality === 'standard' ? '720p' : '1080p';
+      // This model has no dedicated "motion strength" or negative-prompt
+      // field, so both settings get folded into the prompt text itself
+      // instead of being silently dropped like they were on the old
+      // RunPod/Wan2.2 path.
+      const motionPhrase = motion === 'low' ? 'Keep the motion slow, gentle, and minimal.' : motion === 'high' ? 'Make the motion fast, dynamic, and energetic.' : 'Keep the motion natural and moderate.';
+      const videoPrompt = `${finalPrompt} ${motionPhrase}${negativePrompt ? ` Avoid: ${negativePrompt}.` : ''}`;
       const videoInput = {
-        prompt: finalPrompt,
-        size: `${videoWidth}x${videoHeight}`,
-        num_frames: Math.round(videoSeconds * videoFps),
-        fps: videoFps,
-        seed: Number(seed) >= 0 ? Number(seed) : 42,
-        // Send the already-uploaded HTTPS URL, not the raw data: URL. The
-        // full-resolution photo's base64 text can run into the multipart
-        // form-field size limit the omni server enforces per field, which
-        // silently rejects the request with an empty-detail HTTP 400 (the
-        // "the video model rejected the request" error the user keeps
-        // seeing). A short https:// URL avoids that entirely, and the model
-        // server already knows how to fetch image_reference.image_url itself.
-        image_reference: { image_url: referenceUrl }
+        prompt: videoPrompt,
+        image_url: referenceUrl,
+        resolution: videoResolution,
+        duration: String(videoSeconds),
+        aspect_ratio: 'auto',
+        generate_audio: false
       };
-      const videoResponse = await fetch(`https://api.runpod.ai/v2/${videoEndpoint}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey }, body: JSON.stringify({ input: { route: '/v1/videos/sync', body: videoInput } }) });
-      const videoData = await readRunpodResponse(videoResponse);
-      if (videoResponse.ok && videoData.id && (videoData.status === 'IN_QUEUE' || videoData.status === 'IN_PROGRESS')) {
-        return Response.json({ pending: true, jobId: videoData.id, status: videoData.status }, { status: 202 });
+      const videoResponse = await fetch('https://queue.fal.run/bytedance/seedance-2.5/image-to-video', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Key ' + falKey }, body: JSON.stringify(videoInput) });
+      const videoData = await readJsonResponse(videoResponse);
+      if (!videoResponse.ok || !videoData.request_id) {
+        const detail = videoData.detail || videoData.error || videoData.message || `HTTP ${videoResponse.status}`;
+        console.error('generate2: fal video submit failed', { httpStatus: videoResponse.status, detail });
+        return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      const video = extractVideo(videoData.output) || extractVideo(videoData.video);
-      if (!videoResponse.ok || videoData.status === 'FAILED' || !video) {
-        // A completed-but-empty output like {"status":400} means the omni server
-        // rejected the request body; RunPod's own job-done submission drops the
-        // real validation message in that case, so surface the HTTP status we do
-        // have instead of the misleading outer job status ("COMPLETED").
-        const upstreamStatus = videoData.output && typeof videoData.output === 'object' ? videoData.output.status : undefined;
-        const detail = videoData.error || videoData.output?.error || (upstreamStatus ? `the video model rejected the request (HTTP ${upstreamStatus})` : videoData.status) || 'no video returned';
-        return Response.json({ error: `RunPod video generation failed: ${detail}` }, { status: 502 });
-      }
-      const videoResult = video.startsWith('data:') ? video : `data:video/mp4;base64,${video}`;
-      const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
-      if (creditError) {
-        // Never throw away a video that RunPod already generated (and was
-        // already paid for) just because the credit bookkeeping call failed.
-        console.error('generate2: complete_generation_credit failed', creditError);
-        return Response.json({ video: videoResult, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
-      }
-      return Response.json({ video: videoResult, remainingCredits: creditData?.remaining_credits });
+      // fal video jobs are never instant - hand back the request id and let
+      // the frontend poll /api/video-status, same contract as before.
+      return Response.json({ pending: true, jobId: videoData.request_id }, { status: 202 });
     }
     // Qwen Hub endpoints use a simple {prompt,image_url} contract. Keep this
     // provider switch explicit so an endpoint ID can be any generated UUID.
@@ -199,7 +119,7 @@ export async function POST(request) {
     const runpodHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey };
     const runPath = editProvider === 'vllm-omni' ? 'run' : 'runsync';
     const response = await fetch(`https://api.runpod.ai/v2/${runpodEndpoint}/${runPath}`, { method: 'POST', headers: runpodHeaders, body: JSON.stringify({ input: requestInput }) });
-    let data = await readRunpodResponse(response);
+    let data = await readJsonResponse(response);
     // A busy endpoint can return IN_QUEUE/IN_PROGRESS from runsync before the
     // worker has produced output. Poll the job instead of reporting a false
     // image-edit failure to the user.
@@ -208,7 +128,7 @@ export async function POST(request) {
       while (Date.now() < deadline && (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS')) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const statusResponse = await fetch(`https://api.runpod.ai/v2/${runpodEndpoint}/status/${data.id}`, { headers: { Authorization: 'Bearer ' + apiKey } });
-        data = await readRunpodResponse(statusResponse);
+        data = await readJsonResponse(statusResponse);
       }
     }
     const first = data.output?.images?.[0] || data.output?.data?.[0] || data.output?.body?.data?.[0];
