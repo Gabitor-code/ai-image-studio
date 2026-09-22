@@ -149,6 +149,8 @@ export default function Home() {
     finally { setGenerating(false); }
   }
 
+  const settingsSummary = mode === 'video' ? `${videoResolution} · ${duration}s` : `${resolution}px · ${quality === 'standard' ? 'Standard' : 'High detail'}`;
+
   return <main>
     <nav className="nav">
       <a className="brand" href="#top"><span>✦</span> GABITOR</a>
@@ -162,14 +164,23 @@ export default function Home() {
     </section>
     <section id="studio" className="studio-wrap">
       <div className="section-title"><p>01 / STUDIO</p><h2>What will you create?</h2></div>
-      <div className="studio-card"><div className="mode-row">
-        <button className={mode === 'image' ? 'mode active' : 'mode'} onClick={() => setMode('image')}><span>◈</span> Image</button>
-        <button className={mode === 'image-edit' ? 'mode active' : 'mode'} onClick={() => setMode('image-edit')}><span>◈↻</span> Image to image</button>
-        <button className={mode === 'video' ? 'mode active' : 'mode'} onClick={() => setMode('video')}><span>▷</span> Video</button>
+      <div className="studio-card">
+      <div className="prompt-bar">
+        <div className="mode-pills">
+          <button className={mode === 'image' ? 'pill active' : 'pill'} onClick={() => setMode('image')}><span>◈</span> Image</button>
+          <button className={mode === 'image-edit' ? 'pill active' : 'pill'} onClick={() => setMode('image-edit')}><span>◈↻</span> Image to image</button>
+          <button className={mode === 'video' ? 'pill active' : 'pill'} onClick={() => setMode('video')}><span>▷</span> Video</button>
+        </div>
+        <textarea className="prompt-input" value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'image-edit' ? 'Example: Keep the product unchanged and place it in a cinematic Halloween scene...' : mode === 'image' ? 'Example: An elegant perfume bottle in moonlight, on deep-blue marble...' : 'Example: A vintage sports car driving slowly through a sunlit Italian village...'} />
+        <div className="prompt-bar-bottom">
+          <button type="button" className="settings-chip" onClick={() => setShowSettings(!showSettings)}>✧ {settingsSummary} <span>{showSettings ? '▲' : '▾'}</span></button>
+          <span className="bar-spacer" />
+          <button className="send-btn" disabled={generating} onClick={generate} aria-label="Generate">{generating ? '···' : '↑'}</button>
+        </div>
       </div>
-      <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'image-edit' ? 'Example: Keep the product unchanged and place it in a cinematic Halloween scene...' : mode === 'image' ? 'Example: An elegant perfume bottle in moonlight, on deep-blue marble...' : 'Example: A vintage sports car driving slowly through a sunlit Italian village...'} />
       {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio<select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)}><option value="1:1">Square · 1:1</option><option value="16:9">Landscape · 16:9</option><option value="9:16">Portrait · 9:16</option></select></label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && <label>Reference strength<select value={referenceStrength} onChange={event => setReferenceStrength(event.target.value)}><option value="0.2">Subtle · 20%</option><option value="0.3">Balanced · 30%</option><option value="0.5">Strong · 50%</option><option value="0.7">Very strong · 70%</option></select></label>}</div>}{mode === 'video' && <><label>Duration<select value={duration} onChange={event => setDuration(event.target.value)}><option value="5">5 seconds</option><option value="8">8 seconds</option><option value="10">10 seconds</option></select></label><label>Motion<select value={motion} onChange={event => setMotion(event.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label></>}{mode !== 'video' && <label>Image size<select value={resolution} onChange={event => setResolution(event.target.value)}><option value="512">512 × 512</option><option value="768">768 × 768</option><option value="1024">1024 × 1024</option></select></label>}{mode !== 'video' && <label>Quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="standard">Standard</option><option value="high">High detail</option></select></label>}{mode === 'video' && <label>Resolution<select value={videoResolution} onChange={event => setVideoResolution(event.target.value)}><option value="480p">480p</option><option value="720p">720p</option></select></label>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
-      <div className="card-bottom"><button className="settings" onClick={() => setShowSettings(!showSettings)}>✧ Settings {showSettings ? '↑' : '↓'}</button><button className="generate" disabled={generating} onClick={generate}>{generating ? 'Creating…' : <>Generate <span>→</span></>}</button></div>{notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{mode === 'video' ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={image} download={mode === 'video' ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {mode === 'video' ? 'video' : 'image'}</a></div>}</div>
+      {notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{mode === 'video' ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={image} download={mode === 'video' ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {mode === 'video' ? 'video' : 'image'}</a></div>}
+      </div>
       <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
     <section id="gallery" className="gallery-section">
