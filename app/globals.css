@@ -28,3 +28,27 @@
 .settings-panel p.hint{grid-column:1/-1;margin:0;color:#8b90a1;font-size:11px}
 @media(max-width:900px){.settings-panel{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-panel .reference-field{grid-column:span 2}}
 @media(max-width:560px){.settings-panel{grid-template-columns:1fr}.settings-panel .reference-field{grid-column:span 1}}
+
+/* Modern floating prompt-bar (replaces the old boxy tab card for the main generator input) */
+.studio-card{background:transparent;border:0;box-shadow:none;padding:0;display:flex;flex-direction:column;gap:16px}
+.prompt-bar{background:#14151f;border:1px solid #2d2f3d;border-radius:26px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.mode-pills{display:flex;flex-wrap:wrap;gap:8px}
+.mode-pills .pill{border:1px solid #343744;background:#1c1d29;color:#9da2b4;padding:8px 16px;border-radius:999px;font-size:13px;transition:background .15s,color .15s,border-color .15s}
+.mode-pills .pill span{margin-right:6px}
+.mode-pills .pill.active{background:var(--violet);border-color:var(--violet);color:#fff;font-weight:600}
+.mode-pills .pill:hover:not(.active){border-color:#565b73;color:#fff}
+.prompt-input{width:100%;min-height:84px;border:0;resize:none;background:transparent;color:#fff;font:16px/1.5 'DM Sans';outline:none;padding:0}
+.prompt-input::placeholder{color:#666a7d}
+.prompt-bar-bottom{display:flex;align-items:center;gap:12px}
+.settings-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #343744;background:#1c1d29;color:#c7cad6;padding:8px 14px;border-radius:999px;font-size:12px;white-space:nowrap}
+.settings-chip:hover{border-color:#565b73;color:#fff}
+.settings-chip span{font-size:9px;opacity:.75}
+.bar-spacer{flex:1}
+.send-btn{width:42px;height:42px;border-radius:50%;border:0;background:var(--lime);color:#10111a;display:grid;place-items:center;font-size:19px;font-weight:700;flex-shrink:0;transition:transform .15s,opacity .15s}
+.send-btn:hover:not(:disabled){transform:scale(1.07)}
+.send-btn:disabled{opacity:.6;cursor:wait}
+.settings-panel{border-radius:22px;border:1px solid #343744;margin-top:-2px}
+.result-image{background:#14151f;border:1px solid #2d2f3d;border-radius:22px;padding:14px}
+.result-image img,.result-image video{border-radius:14px}
+.notice{color:#c7cad6;font-size:13px;margin:0}
+@media(max-width:560px){.prompt-bar{border-radius:22px;padding:14px}.mode-pills .pill{padding:7px 12px;font-size:12px}}
