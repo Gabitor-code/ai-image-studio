@@ -1,8 +1,8 @@
 'use client';
-
+ 
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-
+ 
 const samples = [
   ['Neon Nights', 'A futuristic city after rain, with neon reflections across the streets', 'image', '/gallery/neon-city.webp'],
   ['Prism', 'A sculptural glass perfume bottle floating above deep blue marble', 'image', '/gallery/prism-bottle.webp'],
@@ -11,7 +11,7 @@ const samples = [
   ['Studio Flow', 'A creative workspace with a holographic moodboard at dusk', 'image', '/gallery/creative-workspace.webp'],
   ['Coastal Drive', 'A chrome sports car on a sunlit Italian coastal road', 'image', '/gallery/coastal-drive.webp']
 ];
-
+ 
 export default function Home() {
   const [mode, setMode] = useState('image');
   const [prompt, setPrompt] = useState('');
@@ -29,6 +29,7 @@ export default function Home() {
   const [resolution, setResolution] = useState('768');
   const [quality, setQuality] = useState('high');
   const [videoResolution, setVideoResolution] = useState('720p');
+  const [videoTier, setVideoTier] = useState('standard');
   const [style, setStyle] = useState('None');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceStrength, setReferenceStrength] = useState('0.3');
@@ -41,21 +42,21 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
-
+ 
   async function readApiResponse(response) {
     const body = await response.text();
     if (!body) return {};
     try { return JSON.parse(body); }
     catch { return { error: response.ok ? 'The server returned an invalid response.' : `Server error (${response.status}). Please try again shortly.` }; }
   }
-
+ 
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, []);
-
+ 
   useEffect(() => {
     if (!supabase || !user) { setCredits(null); return; }
     let active = true;
@@ -79,12 +80,12 @@ export default function Home() {
     ensureProfile();
     return () => { active = false; };
   }, [user]);
-
+ 
   useEffect(() => {
     if (!user) { setCreations([]); return; }
     try { setCreations(JSON.parse(localStorage.getItem(`gabitor-creations-${user.id}`) || '[]')); } catch { setCreations([]); }
   }, [user]);
-
+ 
   async function submitAuth(event) {
     event.preventDefault();
     if (!supabase) { setAuthMessage('Account access is being configured. Please try again shortly.'); return; }
@@ -98,7 +99,7 @@ export default function Home() {
     setAuthOpen(false); setPassword('');
     setNotice(authMode === 'signup' ? 'Your account is ready. Welcome to Gabitor.' : 'You are signed in.');
   }
-
+ 
   async function signOut() { await supabase?.auth.signOut(); setNotice('You have been signed out.'); }
   async function buyCredits(plan) {
     if (!user) { openSignup(); return; }
@@ -121,20 +122,23 @@ export default function Home() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
-      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, videoResolution, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'image-edit' ? 'edit' : 'image' }) });
+      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, videoResolution, videoTier, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'image-edit' ? 'edit' : 'image' }) });
       let data = await readApiResponse(response);
       if (mode === 'video' && response.status === 202 && data.pending && data.jobId) {
         setNotice('Video is queued. Waiting for an available worker…');        const videoJobId = data.jobId;
+        // Which API the job was submitted to - 'alibaba' (Standard tier) or
+        // 'replicate' (Cinematic/Kling tier) - so we poll the right one.
+        const videoProvider = data.provider === 'replicate' ? 'replicate' : 'alibaba';
         const startedAt = Date.now();
-        // 9 minutes: a cold RunPod worker can take 1-3 minutes just to spin up
-        // and load the model before generation even starts, so 5 minutes was
+        // 9 minutes: a cold worker can take 1-3 minutes just to spin up and
+        // load the model before generation even starts, so 5 minutes was
         // giving up on jobs that went on to finish successfully (and had
         // already been billed for) a minute later.
         while (Date.now() - startedAt < 9 * 60 * 1000) {
           await new Promise(resolve => setTimeout(resolve, 5000));
-          const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(videoJobId)}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+          const statusResponse = await fetch(`/api/video-status?jobId=${encodeURIComponent(videoJobId)}&provider=${videoProvider}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
           data = await readApiResponse(statusResponse);
-          if (statusResponse.status === 202 && data.pending) { setNotice(data.status === 'IN_PROGRESS' ? 'Video is being generated…' : 'Video is still queued…'); continue; }
+          if (statusResponse.status === 202 && data.pending) { setNotice(data.status === 'IN_PROGRESS' || data.status === 'RUNNING' || data.status === 'processing' ? 'Video is being generated…' : 'Video is still queued…'); continue; }
           break;
         }
         if (!data.ready) throw new Error(data.error || 'The video is taking too long. Please try again later.');
@@ -148,13 +152,13 @@ export default function Home() {
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
-
-  const settingsSummary = mode === 'video' ? `${videoResolution} · ${duration}s` : `${resolution}px · ${quality === 'standard' ? 'Standard' : 'High detail'}`;
-
+ 
+  const settingsSummary = mode === 'video' ? `${videoTier === 'cinematic' ? 'Cinematic' : videoResolution} · ${duration}s` : `${resolution}px · ${quality === 'standard' ? 'Standard' : 'High detail'}`;
+ 
   function pillGroup(options, value, onChange) {
     return <div className="pill-group">{options.map(option => <button type="button" key={option.value} className={value === option.value ? 'pill-opt active' : 'pill-opt'} onClick={() => onChange(option.value)}>{option.label}</button>)}</div>;
   }
-
+ 
   return <main>
     <nav className="nav">
       <a className="brand" href="#top"><span>✦</span> GABITOR</a>
@@ -182,7 +186,7 @@ export default function Home() {
           <button className="send-btn" disabled={generating} onClick={generate} aria-label="Generate">{generating ? '···' : '↑'}</button>
         </div>
       </div>
-      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{mode === 'video' && <><label>Duration{pillGroup([{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{mode === 'video' && <label>Resolution{pillGroup([{ value: '480p', label: '480p' }, { value: '720p', label: '720p' }], videoResolution, setVideoResolution)}</label>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
+      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{mode === 'video' && <label>Engine{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'cinematic', label: 'Cinematic' }], videoTier, setVideoTier)}</label>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{mode === 'video' && <><label>Duration{pillGroup(videoTier === 'cinematic' ? [{ value: '5', label: '5s' }, { value: '10', label: '10s' }] : [{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{mode === 'video' && videoTier === 'standard' && <label>Resolution{pillGroup([{ value: '480p', label: '480p' }, { value: '720p', label: '720p' }], videoResolution, setVideoResolution)}</label>}{mode === 'video' && videoTier === 'cinematic' && <p className="hint">Cinematic mode picks its own resolution automatically (up to 1080p).</p>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
       {notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{mode === 'video' ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={image} download={mode === 'video' ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {mode === 'video' ? 'video' : 'image'}</a></div>}
       </div>
       <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
@@ -205,3 +209,4 @@ export default function Home() {
     </form></div>}
   </main>;
 }
+ 
