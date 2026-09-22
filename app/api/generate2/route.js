@@ -1,35 +1,43 @@
 import { createClient } from '@supabase/supabase-js';
-
+ 
 export const maxDuration = 60;
-
-// Shared by the RunPod (image/edit) and fal.ai (video) providers below - both
-// return plain JSON bodies, and this keeps a bad/non-JSON error body from
-// throwing before we get a chance to report it.
+ 
+// Shared by every provider below (RunPod, Alibaba Cloud Model Studio,
+// Replicate) - they all return plain JSON bodies, and this keeps a bad/
+// non-JSON error body from throwing before we get a chance to report it.
 async function readJsonResponse(response) {
   const body = await response.text();
   if (!body) return { status: response.ok ? undefined : `HTTP_${response.status}` };
   try { return JSON.parse(body); }
   catch { return { status: `HTTP_${response.status}`, error: body.slice(0, 500) }; }
 }
-
+ 
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL, anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    const apiKey = process.env.RUNPOD_API_KEY, endpoint = process.env.RUNPOD_ENDPOINT_ID;
-    const imageEndpoint = process.env.RUNPOD_IMAGE_ENDPOINT_ID || endpoint;
+    const apiKey = process.env.RUNPOD_API_KEY;
     const editEndpoint = process.env.RUNPOD_EDIT_ENDPOINT_ID;
-    // Video generation moved off RunPod onto fal.ai's hosted Seedance 2.5
-    // (better motion/detail quality than the self-hosted Lightning-distilled
-    // Wan2.2 checkpoint, and no GPU worker for us to run or pay cold-start
-    // time on). Image and image-edit still run on our own RunPod endpoints.
-    const falKey = process.env.FAL_KEY;
+    // Image generation (workflowMode 'image') moved off RunPod/Flux onto
+    // Alibaba Cloud Model Studio's Qwen-Image-3.0, and video generation moved
+    // off fal.ai's Seedance 2.5 onto a two-tier setup: Alibaba Cloud's Wan
+    // image-to-video for the "Standard" tier, and Kling v2.5 Turbo Pro
+    // (via Replicate) for the "Cinematic" tier. RunPod is now only used for
+    // the reference-image "edit" workflow.
+    const dashscopeKey = process.env.DASHSCOPE_API_KEY;
+    const dashscopeBase = process.env.DASHSCOPE_BASE_URL || 'https://dashscope-intl.aliyuncs.com';
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
     if (!token || !url || !anon) return Response.json({ error: 'Please sign in to create an image.' }, { status: 401 });
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt, style, resolution = '768', quality = 'high', videoResolution = '720p', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
-    if ((workflowMode === 'image' && !imageEndpoint) || (workflowMode === 'edit' && !editEndpoint) || (workflowMode === 'video' && !falKey) || (workflowMode !== 'video' && !apiKey)) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
+    const { prompt, style, resolution = '768', quality = 'high', videoResolution = '720p', videoTier = 'standard', aspectRatio = '1:1', referenceStrength = 0.3, duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
+    const videoTierValue = videoTier === 'cinematic' ? 'cinematic' : 'standard';
+    if (
+      (workflowMode === 'image' && !dashscopeKey) ||
+      (workflowMode === 'edit' && (!editEndpoint || !apiKey)) ||
+      (workflowMode === 'video' && (videoTierValue === 'cinematic' ? !replicateToken : !dashscopeKey))
+    ) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
@@ -64,43 +72,74 @@ export async function POST(request) {
       if (uploadError) return Response.json({ error: 'Reference image storage is not configured yet. Please create a public "references" bucket in Supabase.' }, { status: 503 });
       referenceUrl = db.storage.from('references').getPublicUrl(path).data.publicUrl;
     }
+    if (workflowMode === 'image') {
+      // Qwen-Image-3.0 (Alibaba Cloud Model Studio) - synchronous text-to-image.
+      // No polling needed: the image URL comes back directly in the response
+      // (valid for 24h, same as the video providers below - it's re-hosted
+      // on Supabase/downloaded by the user well before that).
+      const imageModel = process.env.DASHSCOPE_IMAGE_MODEL || 'qwen-image-3.0-pro';
+      const qwenBody = {
+        model: imageModel,
+        input: { messages: [{ role: 'user', content: [{ text: finalPrompt }] }] },
+        parameters: { prompt_extend: true, n: 1, size: `${width}*${height}`, seed: safeSeed, watermark: false, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }
+      };
+      const qwenResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/multimodal-generation/generation`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey }, body: JSON.stringify(qwenBody) });
+      const qwenData = await readJsonResponse(qwenResponse);
+      const qwenImageUrl = qwenData.output?.choices?.[0]?.message?.content?.find(item => item?.image)?.image;
+      if (!qwenResponse.ok || !qwenImageUrl) {
+        const detail = qwenData.message || qwenData.error || qwenData.code || `HTTP ${qwenResponse.status}`;
+        console.error('generate2: Qwen-Image request failed', { httpStatus: qwenResponse.status, detail });
+        return Response.json({ error: `Image generation failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
+      }
+      const { data: qwenCreditData, error: qwenCreditError } = await db.rpc('complete_generation_credit');
+      if (qwenCreditError) {
+        console.error('generate2: complete_generation_credit failed', qwenCreditError);
+        return Response.json({ image: qwenImageUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
+      }
+      return Response.json({ image: qwenImageUrl, remainingCredits: qwenCreditData?.remaining_credits });
+    }
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
       const videoSeconds = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
-      // Seedance 2.5 image-to-video always follows the uploaded photo's own
-      // aspect ratio ('auto' is the only supported value here) - same
-      // end result as before, just something the model does for us now
-      // instead of us computing a pixel size ourselves.
-      // fal.ai's Seedance 2.5 image-to-video endpoint only supports 480p and
-      // 720p (confirmed directly on fal's own model page - unlike Seedance
-      // 2.0, this model does NOT offer 1080p or 4K), so the frontend now
-      // sends the real resolution string directly instead of an abstract
-      // "standard/high" quality tier.
+      // "Standard" (Alibaba Wan) supports 480p/720p; "Cinematic" (Kling on
+      // Replicate) picks its own output resolution (up to 1080p) - it has no
+      // resolution input, so this value is only used for the Standard tier.
       const resolutionValue = ['480p', '720p'].includes(videoResolution) ? videoResolution : '720p';
-      // This model has no dedicated "motion strength" or negative-prompt
-      // field, so both settings get folded into the prompt text itself
-      // instead of being silently dropped like they were on the old
-      // RunPod/Wan2.2 path.
       const motionPhrase = motion === 'low' ? 'Keep the motion slow, gentle, and minimal.' : motion === 'high' ? 'Make the motion fast, dynamic, and energetic.' : 'Keep the motion natural and moderate.';
       const videoPrompt = `${finalPrompt} ${motionPhrase}${negativePrompt ? ` Avoid: ${negativePrompt}.` : ''}`;
-      const videoInput = {
-        prompt: videoPrompt,
-        image_url: referenceUrl,
-        resolution: resolutionValue,
-        duration: String(videoSeconds),
-        aspect_ratio: 'auto',
-        generate_audio: false
-      };
-      const videoResponse = await fetch('https://queue.fal.run/bytedance/seedance-2.5/image-to-video', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Key ' + falKey }, body: JSON.stringify(videoInput) });
-      const videoData = await readJsonResponse(videoResponse);
-      if (!videoResponse.ok || !videoData.request_id) {
-        const detail = videoData.detail || videoData.error || videoData.message || `HTTP ${videoResponse.status}`;
-        console.error('generate2: fal video submit failed', { httpStatus: videoResponse.status, detail });
+ 
+      if (videoTierValue === 'cinematic') {
+        // Kling v2.5 Turbo Pro via Replicate. Duration input only accepts 5 or 10s.
+        const klingResponse = await fetch('https://api.replicate.com/v1/predictions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + replicateToken },
+          body: JSON.stringify({ version: 'kwaivgi/kling-v2.5-turbo-pro', input: { prompt: videoPrompt, image: referenceUrl, duration: videoSeconds >= 8 ? 10 : 5, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) } })
+        });
+        const klingData = await readJsonResponse(klingResponse);
+        if (!klingResponse.ok || !klingData.id) {
+          const detail = klingData.detail || klingData.error || `HTTP ${klingResponse.status}`;
+          console.error('generate2: Replicate/Kling submit failed', { httpStatus: klingResponse.status, detail });
+          return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
+        }
+        // Replicate jobs are never instant - hand back the prediction id and
+        // which provider it came from, so the frontend can poll the right one.
+        return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
+      }
+ 
+      // "Standard" tier: Alibaba Cloud Model Studio, Wan image-to-video.
+      const wanModel = process.env.DASHSCOPE_VIDEO_MODEL || 'wan2.7-i2v-2026-04-25';
+      const wanResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/video-generation/video-synthesis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey, 'X-DashScope-Async': 'enable' },
+        body: JSON.stringify({ model: wanModel, input: { prompt: videoPrompt, media: [{ type: 'first_frame', url: referenceUrl }] }, parameters: { resolution: resolutionValue === '480p' ? '480P' : '720P', duration: videoSeconds, prompt_extend: true, watermark: false } })
+      });
+      const wanData = await readJsonResponse(wanResponse);
+      if (!wanResponse.ok || !wanData.output?.task_id) {
+        const detail = wanData.message || wanData.error || wanData.code || `HTTP ${wanResponse.status}`;
+        console.error('generate2: Alibaba/Wan video submit failed', { httpStatus: wanResponse.status, detail });
         return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      // fal video jobs are never instant - hand back the request id and let
-      // the frontend poll /api/video-status, same contract as before.
-      return Response.json({ pending: true, jobId: videoData.request_id }, { status: 202 });
+      return Response.json({ pending: true, jobId: wanData.output.task_id, provider: 'alibaba' }, { status: 202 });
     }
     // Qwen Hub endpoints use a simple {prompt,image_url} contract. Keep this
     // provider switch explicit so an endpoint ID can be any generated UUID.
@@ -117,7 +156,9 @@ export async function POST(request) {
           : { prompt: finalPrompt, image_url: referenceUrl })
         : { workflow, images: imagePayload }
       : { workflow, ...(imagePayload ? { images: imagePayload } : {}) };
-    const runpodEndpoint = workflowMode === 'edit' ? editEndpoint : imageEndpoint;
+    // Only the 'edit' workflow reaches this point now - 'image' and 'video'
+    // both return earlier above.
+    const runpodEndpoint = editEndpoint;
     const runpodHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey };
     const runPath = editProvider === 'vllm-omni' ? 'run' : 'runsync';
     const response = await fetch(`https://api.runpod.ai/v2/${runpodEndpoint}/${runPath}`, { method: 'POST', headers: runpodHeaders, body: JSON.stringify({ input: requestInput }) });
@@ -156,3 +197,4 @@ export async function POST(request) {
     return Response.json({ image: imageResult, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to generate an image right now. Your credit was not used.' }, { status: 500 }); }
 }
+ 
