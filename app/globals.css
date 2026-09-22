@@ -52,3 +52,9 @@
 .result-image img,.result-image video{border-radius:14px}
 .notice{color:#c7cad6;font-size:13px;margin:0}
 @media(max-width:560px){.prompt-bar{border-radius:22px;padding:14px}.mode-pills .pill{padding:7px 12px;font-size:12px}}
+
+/* Segmented pill-style controls inside the settings panel (aspect ratio, resolution, duration, motion, quality...) - replaces plain <select> for short option lists, inspired by the reference UI. */
+.pill-group{display:flex;flex-wrap:wrap;gap:6px}
+.pill-opt{border:1px solid #343744;background:#1c1d29;color:#9da2b4;padding:6px 12px;border-radius:999px;font-size:12px;transition:background .15s,color .15s,border-color .15s}
+.pill-opt.active{background:var(--violet);border-color:var(--violet);color:#fff;font-weight:600}
+.pill-opt:hover:not(.active){border-color:#565b73;color:#fff}
