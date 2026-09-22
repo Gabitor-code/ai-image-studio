@@ -81,7 +81,10 @@ export async function POST(request) {
       const qwenBody = {
         model: imageModel,
         input: { messages: [{ role: 'user', content: [{ text: finalPrompt }] }] },
-        parameters: { prompt_extend: true, n: 1, size: `${width}*${height}`, seed: safeSeed, watermark: false, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }
+        // Qwen-Image's seed field is a signed 32-bit int (max 2147483647) -
+        // safeSeed can be much larger (it's also used for the RunPod/ComfyUI
+        // workflow below, which tolerates bigger numbers), so clamp it here.
+        parameters: { prompt_extend: true, n: 1, size: `${width}*${height}`, seed: safeSeed % 2147483647, watermark: false, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }
       };
       const qwenResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/multimodal-generation/generation`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey }, body: JSON.stringify(qwenBody) });
       const qwenData = await readJsonResponse(qwenResponse);
@@ -101,10 +104,14 @@ export async function POST(request) {
     if (workflowMode === 'video') {
       if (!referenceImage) return Response.json({ error: 'Please upload an image for image-to-video generation.' }, { status: 400 });
       const videoSeconds = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
-      // "Standard" (Alibaba Wan) supports 480p/720p; "Cinematic" (Kling on
-      // Replicate) picks its own output resolution (up to 1080p) - it has no
-      // resolution input, so this value is only used for the Standard tier.
-      const resolutionValue = ['480p', '720p'].includes(videoResolution) ? videoResolution : '720p';
+      // "Standard" (Alibaba Wan wan2.7-i2v) only accepts 720P or 1080P for
+      // `parameters.resolution` - 480P is not a supported value for this
+      // model and was previously being sent through as "480P" whenever the
+      // UI's 480p option was picked, which Alibaba Cloud rejected on every
+      // single call (InvalidParameter). "Cinematic" (Kling on Replicate)
+      // picks its own output resolution (up to 1080p) - it has no resolution
+      // input, so this value is only used for the Standard tier.
+      const resolutionValue = ['720p', '1080p'].includes(videoResolution) ? videoResolution : '720p';
       const motionPhrase = motion === 'low' ? 'Keep the motion slow, gentle, and minimal.' : motion === 'high' ? 'Make the motion fast, dynamic, and energetic.' : 'Keep the motion natural and moderate.';
       const videoPrompt = `${finalPrompt} ${motionPhrase}${negativePrompt ? ` Avoid: ${negativePrompt}.` : ''}`;
  
@@ -131,7 +138,7 @@ export async function POST(request) {
       const wanResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/video-generation/video-synthesis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey, 'X-DashScope-Async': 'enable' },
-        body: JSON.stringify({ model: wanModel, input: { prompt: videoPrompt, media: [{ type: 'first_frame', url: referenceUrl }] }, parameters: { resolution: resolutionValue === '480p' ? '480P' : '720P', duration: videoSeconds, prompt_extend: true, watermark: false } })
+        body: JSON.stringify({ model: wanModel, input: { prompt: videoPrompt, media: [{ type: 'first_frame', url: referenceUrl }] }, parameters: { resolution: resolutionValue === '1080p' ? '1080P' : '720P', duration: videoSeconds, prompt_extend: true, watermark: false } })
       });
       const wanData = await readJsonResponse(wanResponse);
       if (!wanResponse.ok || !wanData.output?.task_id) {
