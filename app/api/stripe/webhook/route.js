@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { createHmac, timingSafeEqual } from 'crypto';
 
-const PLAN_CREDITS = { starter: 50, creator: 150, pro: 400 };
+// Keep in sync with the pricing cards in app/page.js and PLANS in
+// app/api/checkout/route.js. This is the number that's actually credited -
+// deliberately re-derived from the trusted `plan` name rather than trusting
+// the `metadata.credits` value checkout attached to the session.
+const PLAN_CREDITS = { starter: 200, creator: 550, pro: 1200 };
 
 function validSignature(payload, signature, secret) {
   const values = Object.fromEntries(signature.split(',').map((entry) => entry.split('=')));

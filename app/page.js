@@ -63,19 +63,20 @@ export default function Home() {
   useEffect(() => {
     if (!supabase || !user) { setCredits(null); return; }
     let active = true;
-    async function ensureProfile() {
+    // Credits (including the 15 welcome credits) are granted entirely by a
+    // database trigger on signup, and are only ever changed afterwards by
+    // SECURITY DEFINER functions (reserve_generation_slot,
+    // complete_generation_credit, fulfill_stripe_credits). The client has no
+    // write access to this row's credits any more (see the profiles RLS/grant
+    // lockdown) - it only ever reads. Right after signup there's a brief
+    // window where the trigger's row may not have replicated yet, so a
+    // missing row just means "try again shortly", not "create it ourselves".
+    async function ensureProfile(attempt = 0) {
       const { data, error } = await supabase.from('profiles').select('credits').eq('id', user.id).maybeSingle();
       if (error) { if (active) setCredits(0); return; }
       if (!data) {
-        const { data: created, error: createError } = await supabase.from('profiles').insert({ id: user.id, credits: 15 }).select('credits').single();
-        if (!createError) await supabase.auth.updateUser({ data: { welcome_credits_granted: true } });
-        if (active) setCredits(createError ? 0 : (created?.credits ?? 15));
-        return;
-      }
-      if ((data.credits ?? 0) === 0 && !user.user_metadata?.welcome_credits_granted) {
-        const { data: updated, error: updateError } = await supabase.from('profiles').update({ credits: 15 }).eq('id', user.id).select('credits').single();
-        if (!updateError) await supabase.auth.updateUser({ data: { welcome_credits_granted: true } });
-        if (active) setCredits(updateError ? 0 : (updated?.credits ?? 15));
+        if (attempt < 5) { setTimeout(() => { if (active) ensureProfile(attempt + 1); }, 400); return; }
+        if (active) setCredits(0);
         return;
       }
       if (active) setCredits(data.credits ?? 0);

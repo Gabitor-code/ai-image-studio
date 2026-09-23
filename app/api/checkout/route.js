@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Keep in sync with the pricing cards in app/page.js and PLAN_CREDITS in
+// app/api/stripe/webhook/route.js.
 const PLANS = {
-  starter: { credits: 50, priceEnv: 'STRIPE_STARTER_PRICE_ID' },
-  creator: { credits: 150, priceEnv: 'STRIPE_CREATOR_PRICE_ID' },
-  pro: { credits: 400, priceEnv: 'STRIPE_PRO_PRICE_ID' }
+  starter: { credits: 200, priceEnv: 'STRIPE_STARTER_PRICE_ID' },
+  creator: { credits: 550, priceEnv: 'STRIPE_CREATOR_PRICE_ID' },
+  pro: { credits: 1200, priceEnv: 'STRIPE_PRO_PRICE_ID' }
 };
 
 export async function POST(request) {
