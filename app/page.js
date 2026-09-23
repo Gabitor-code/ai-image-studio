@@ -1,8 +1,8 @@
 'use client';
- 
+
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
- 
+
 const samples = [
   ['Neon Nights', 'A futuristic city after rain, with neon reflections across the streets', 'image', '/gallery/neon-city.webp'],
   ['Prism', 'A sculptural glass perfume bottle floating above deep blue marble', 'image', '/gallery/prism-bottle.webp'],
@@ -11,7 +11,7 @@ const samples = [
   ['Studio Flow', 'A creative workspace with a holographic moodboard at dusk', 'image', '/gallery/creative-workspace.webp'],
   ['Coastal Drive', 'A chrome sports car on a sunlit Italian coastal road', 'image', '/gallery/coastal-drive.webp']
 ];
- 
+
 export default function Home() {
   const [mode, setMode] = useState('image');
   const [prompt, setPrompt] = useState('');
@@ -42,21 +42,21 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
- 
+
   async function readApiResponse(response) {
     const body = await response.text();
     if (!body) return {};
     try { return JSON.parse(body); }
     catch { return { error: response.ok ? 'The server returned an invalid response.' : `Server error (${response.status}). Please try again shortly.` }; }
   }
- 
+
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, []);
- 
+
   useEffect(() => {
     if (!supabase || !user) { setCredits(null); return; }
     let active = true;
@@ -80,12 +80,12 @@ export default function Home() {
     ensureProfile();
     return () => { active = false; };
   }, [user]);
- 
+
   useEffect(() => {
     if (!user) { setCreations([]); return; }
     try { setCreations(JSON.parse(localStorage.getItem(`gabitor-creations-${user.id}`) || '[]')); } catch { setCreations([]); }
   }, [user]);
- 
+
   async function submitAuth(event) {
     event.preventDefault();
     if (!supabase) { setAuthMessage('Account access is being configured. Please try again shortly.'); return; }
@@ -99,7 +99,7 @@ export default function Home() {
     setAuthOpen(false); setPassword('');
     setNotice(authMode === 'signup' ? 'Your account is ready. Welcome to Gabitor.' : 'You are signed in.');
   }
- 
+
   async function signOut() { await supabase?.auth.signOut(); setNotice('You have been signed out.'); }
   async function buyCredits(plan) {
     if (!user) { openSignup(); return; }
@@ -152,22 +152,16 @@ export default function Home() {
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
- 
+
   const settingsSummary = mode === 'video' ? `${videoTier === 'cinematic' ? 'Cinematic' : videoResolution} · ${duration}s` : `${resolution}px · ${quality === 'standard' ? 'Standard' : 'High detail'}`;
-  // Mirrors the server-side cost table in app/api/generate2/route.js - keep
-  // the two in sync. This is display-only; the API always recomputes and
-  // enforces the real cost itself.
-  const creditCost = mode === 'video'
-    ? (videoTier === 'cinematic' ? 4 : (videoResolution === '1080p' ? 8 : 5)) * (([5, 8, 10].includes(Number(duration)) ? Number(duration) : 5))
-    : 2;
- 
+
   function pillGroup(options, value, onChange) {
     return <div className="pill-group">{options.map(option => <button type="button" key={option.value} className={value === option.value ? 'pill-opt active' : 'pill-opt'} onClick={() => onChange(option.value)}>{option.label}</button>)}</div>;
   }
- 
+
   return <main>
     <nav className="nav">
-      <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /></a>
+      <a className="brand" href="#top"><span>✦</span> GABITOR</a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
       {user ? <div className="profile-area"><div className="profile-chip"><span className="profile-avatar">{(user.email || 'G').charAt(0).toUpperCase()}</span><span className="profile-info"><strong>{user.email}</strong><small>{credits ?? '…'} credits</small></span></div><button className="account" onClick={signOut}>Sign out</button></div> : <button className="account" onClick={() => { setAuthMode('signin'); setAuthMessage(''); setAuthOpen(true); }}>Sign in</button>}
     </nav>
@@ -195,7 +189,7 @@ export default function Home() {
       {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{mode === 'video' && <label>Engine{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'cinematic', label: 'Cinematic' }], videoTier, setVideoTier)}</label>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{mode === 'video' && <><label>Duration{pillGroup(videoTier === 'cinematic' ? [{ value: '5', label: '5s' }, { value: '10', label: '10s' }] : [{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{mode === 'video' && videoTier === 'standard' && <label>Resolution{pillGroup([{ value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }], videoResolution, setVideoResolution)}</label>}{mode === 'video' && videoTier === 'cinematic' && <p className="hint">Cinematic mode picks its own resolution automatically (up to 1080p).</p>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
       {notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{mode === 'video' ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={image} download={mode === 'video' ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {mode === 'video' ? 'video' : 'image'}</a></div>}
       </div>
-      <div className="credit-line"><span>✦</span> {user ? `This generation costs ${creditCost} credits` : `This generation costs ${creditCost} credits · Register for 15 free credits`} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
+      <div className="credit-line"><span>✦</span> {user ? `${credits ?? '…'} credits available` : 'Register for 15 free credits'} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
     <section id="gallery" className="gallery-section">
       <div className="section-title"><p>02 / INSPIRATION</p><h2>Start with an idea.</h2></div><div className="sample-grid">
@@ -203,8 +197,8 @@ export default function Home() {
       <button className="gallery-button" onClick={() => setShowGallery(!showGallery)}>{showGallery ? 'Close gallery' : 'Open gallery'} <span>→</span></button>
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}>{creation.kind === 'video' ? <video className="creation-media" src={creation.image} controls playsInline preload="metadata" /> : <img className="creation-media" src={creation.image} alt={creation.prompt} />}<div><p>{creation.prompt}</p><a href={creation.image} download={`gabitor-${creation.id}.${creation.kind === 'video' ? 'mp4' : 'png'}`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
-    <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>200 credits</strong><span>Images &amp; video · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>550 credits</strong><span>Images &amp; video · Best value · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>1200 credits</strong><span>Images &amp; video · 20% more credits · No subscription</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
-    <footer><a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /></a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
+    <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>50 credits</strong><span>AI image generations · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>150 credits</strong><span>AI image generations · Best value · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>400 credits</strong><span>AI image generations · 20% more credits · No subscription</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
+    <footer><a className="brand" href="#top"><span>✦</span> GABITOR</a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
     {authOpen && <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Account access"><form className="auth-card" onSubmit={submitAuth}>
       <button type="button" className="auth-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button><p className="eyebrow">GABITOR ACCOUNT</p>
       <h2>{authMode === 'signup' ? 'Start creating.' : 'Welcome back.'}</h2><p>{authMode === 'signup' ? 'Register now and receive 15 free credits.' : 'Sign in to access your credits and creations.'}</p>
