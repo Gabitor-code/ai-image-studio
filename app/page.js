@@ -167,7 +167,7 @@ export default function Home() {
  
   return <main>
     <nav className="nav">
-      <a className="brand" href="#top"><span>✦</span> GABITOR</a>
+      <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /></a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
       {user ? <div className="profile-area"><div className="profile-chip"><span className="profile-avatar">{(user.email || 'G').charAt(0).toUpperCase()}</span><span className="profile-info"><strong>{user.email}</strong><small>{credits ?? '…'} credits</small></span></div><button className="account" onClick={signOut}>Sign out</button></div> : <button className="account" onClick={() => { setAuthMode('signin'); setAuthMessage(''); setAuthOpen(true); }}>Sign in</button>}
     </nav>
@@ -204,7 +204,7 @@ export default function Home() {
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}>{creation.kind === 'video' ? <video className="creation-media" src={creation.image} controls playsInline preload="metadata" /> : <img className="creation-media" src={creation.image} alt={creation.prompt} />}<div><p>{creation.prompt}</p><a href={creation.image} download={`gabitor-${creation.id}.${creation.kind === 'video' ? 'mp4' : 'png'}`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
     <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>200 credits</strong><span>Images &amp; video · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>550 credits</strong><span>Images &amp; video · Best value · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>1200 credits</strong><span>Images &amp; video · 20% more credits · No subscription</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
-    <footer><a className="brand" href="#top"><span>✦</span> GABITOR</a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
+    <footer><a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /></a><p>© 2026 Gabitor AI</p><p>AI-powered creative tools</p></footer>
     {authOpen && <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Account access"><form className="auth-card" onSubmit={submitAuth}>
       <button type="button" className="auth-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button><p className="eyebrow">GABITOR ACCOUNT</p>
       <h2>{authMode === 'signup' ? 'Start creating.' : 'Welcome back.'}</h2><p>{authMode === 'signup' ? 'Register now and receive 15 free credits.' : 'Sign in to access your credits and creations.'}</p>

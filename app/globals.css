@@ -58,3 +58,8 @@
 .pill-opt{border:1px solid #343744;background:#1c1d29;color:#9da2b4;padding:6px 12px;border-radius:999px;font-size:12px;transition:background .15s,color .15s,border-color .15s}
 .pill-opt.active{background:var(--violet);border-color:var(--violet);color:#fff;font-weight:600}
 .pill-opt:hover:not(.active){border-color:#565b73;color:#fff}
+
+/* Logo image replacing the old "✦ GABITOR" text mark in the nav and footer. */
+.brand{display:inline-flex;align-items:center}
+.brand-logo{height:38px;width:auto;display:block}
+footer .brand-logo{height:32px}
