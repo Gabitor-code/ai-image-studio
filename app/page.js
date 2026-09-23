@@ -10,9 +10,9 @@ const samples = [
   ['Light Forms', 'Abstract ribbons of violet, coral and lime light in motion', 'image', '/gallery/light-ribbons.webp'],
   ['Studio Flow', 'A creative workspace with a holographic moodboard at dusk', 'image', '/gallery/creative-workspace.webp'],
   ['Coastal Drive', 'A chrome sports car on a sunlit Italian coastal road', 'image', '/gallery/coastal-drive.webp'],
-  ['First Contact', 'A friendly humanoid robot kneeling to greet a curious little girl on a rooftop at sunset', 'text-video', '/gallery/first-contact.mp4'],
-  ['Neon Skyline', 'A flying car speeding through a neon-lit cyberpunk city at night, giant holographic faces glowing on the towers', 'text-video', '/gallery/neon-skyline.mp4'],
-  ['Rusted Relic', 'A weathered robotic hand lying in the rubble of an abandoned factory, embers flickering nearby', 'text-video', '/gallery/relic-hand.mp4']
+  ['Robot Awakening', 'Cinematic shot inside an abandoned futuristic factory, dust particles floating in shafts of cold blue light. An old humanoid robot covered in rust and cables slowly opens its glowing amber eyes. Its fingers twitch, then it lifts its head and looks around in wonder. Sparks fall from the ceiling, holographic warning signs flicker in the background. Slow dolly-in camera movement, shallow depth of field, moody sci-fi atmosphere, volumetric lighting, 4K, photorealistic, Blade Runner style color grading.', 'text-video', '/gallery/relic-hand.mp4'],
+  ['Neon AI City', 'Epic aerial drone shot flying through a massive cyberpunk megacity at night, towering skyscrapers covered in neon holograms and giant AI faces made of light. Flying cars stream between buildings, rain reflects pink and cyan lights on glass surfaces. A glowing neural-network pattern pulses across the entire skyline like a living brain. Fast smooth camera glide, cinematic wide angle, ultra-detailed, futuristic, 4K, high contrast, atmospheric fog.', 'text-video', '/gallery/neon-skyline.mp4'],
+  ['First Contact', 'A small girl in a yellow raincoat stands on a quiet rooftop at sunset, facing a tall sleek white android with a softly glowing blue core in its chest. The robot slowly kneels down and gently opens its metal hand, revealing a tiny holographic flower that blooms in light. Warm golden hour lighting mixed with soft blue sci-fi glow, city skyline in the background, gentle wind moving her hair. Slow orbiting camera, emotional, cinematic, shallow depth of field, 4K, Pixar-meets-realism aesthetic.', 'text-video', '/gallery/first-contact.mp4']
 ];
  
 export default function Home() {
