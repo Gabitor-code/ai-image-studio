@@ -32,8 +32,8 @@ export async function POST(request) {
     const { prompt, style, resolution = '768', videoResolution = '720p', videoTier = 'standard', aspectRatio = '1:1', duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
     const videoTierValue = videoTier === 'cinematic' ? 'cinematic' : 'standard';
     if (
-      ((workflowMode === 'image' || workflowMode === 'edit' || workflowMode === 'text-video') && !dashscopeKey) ||
-      (workflowMode === 'video' && (videoTierValue === 'cinematic' ? !replicateToken : !dashscopeKey))
+      ((workflowMode === 'image' || workflowMode === 'edit') && !dashscopeKey) ||
+      ((workflowMode === 'video' || workflowMode === 'text-video') && (videoTierValue === 'cinematic' ? !replicateToken : !dashscopeKey))
     ) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
     if (workflowMode === 'edit' && !referenceImage) return Response.json({ error: 'Please upload a reference image for image-to-image editing.' }, { status: 400 });
@@ -124,22 +124,42 @@ export async function POST(request) {
       return Response.json({ image: editImageUrl, remainingCredits: editCreditData?.remaining_credits });
     }
     if (workflowMode === 'text-video') {
-      // Wan2.7 text-to-video (Alibaba Cloud Model Studio) - no reference
-      // image needed. Same async task-based flow as the Standard
-      // image-to-video tier below (poll /api/video-status), but the input
-      // is just a prompt, and unlike image-to-video it also takes an
-      // explicit aspect ratio (there's no source image to infer it from).
-      // Alibaba bills Standard text-to-video and image-to-video at the same
-      // per-second rate, so this reuses the Standard tier's credit cost.
+      // Same async task-based flow as image-to-video below (poll
+      // /api/video-status), but there's no reference image - just a prompt
+      // and an explicit aspect ratio (there's no source photo to infer it
+      // from). Also mirrors image-to-video's two-engine split:
       const videoSeconds = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
-      const resolutionValue = ['720p', '1080p'].includes(videoResolution) ? videoResolution : '720p';
       const motionPhrase = motion === 'low' ? 'Keep the motion slow, gentle, and minimal.' : motion === 'high' ? 'Make the motion fast, dynamic, and energetic.' : 'Keep the motion natural and moderate.';
       const videoPrompt = `${finalPrompt} ${motionPhrase}`;
+      const t2vAspectRatio = ['16:9', '9:16', '1:1'].includes(aspectRatio) ? aspectRatio : '16:9';
+
+      if (videoTierValue === 'cinematic') {
+        // Kling v2.5 Turbo Pro via Replicate handles both image-to-video and
+        // text-to-video on the same model version - simply omit `image` for
+        // a prompt-only generation. Duration input only accepts 5 or 10s.
+        const klingResponse = await fetch('https://api.replicate.com/v1/predictions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + replicateToken },
+          body: JSON.stringify({ version: 'kwaivgi/kling-v2.5-turbo-pro', input: { prompt: videoPrompt, aspect_ratio: t2vAspectRatio, duration: videoSeconds >= 8 ? 10 : 5, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) } })
+        });
+        const klingData = await readJsonResponse(klingResponse);
+        if (!klingResponse.ok || !klingData.id) {
+          const detail = klingData.detail || klingData.error || `HTTP ${klingResponse.status}`;
+          console.error('generate2: Replicate/Kling text-to-video submit failed', { httpStatus: klingResponse.status, detail });
+          return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
+        }
+        return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
+      }
+
+      // Standard tier: Wan2.7 text-to-video (Alibaba Cloud Model Studio).
+      // Alibaba bills Standard text-to-video and image-to-video at the same
+      // per-second rate, so this reuses the Standard tier's credit cost.
+      const resolutionValue = ['720p', '1080p'].includes(videoResolution) ? videoResolution : '720p';
       const t2vModel = process.env.DASHSCOPE_T2V_MODEL || 'wan2.7-t2v-2026-06-12';
       const t2vResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/video-generation/video-synthesis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey, 'X-DashScope-Async': 'enable' },
-        body: JSON.stringify({ model: t2vModel, input: { prompt: videoPrompt, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }, parameters: { resolution: resolutionValue === '1080p' ? '1080P' : '720P', ratio: ['16:9', '9:16', '1:1'].includes(aspectRatio) ? aspectRatio : '16:9', duration: videoSeconds, seed: dashscopeSeed, prompt_extend: true, watermark: false } })
+        body: JSON.stringify({ model: t2vModel, input: { prompt: videoPrompt, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }, parameters: { resolution: resolutionValue === '1080p' ? '1080P' : '720P', ratio: t2vAspectRatio, duration: videoSeconds, seed: dashscopeSeed, prompt_extend: true, watermark: false } })
       });
       const t2vData = await readJsonResponse(t2vResponse);
       if (!t2vResponse.ok || !t2vData.output?.task_id) {
