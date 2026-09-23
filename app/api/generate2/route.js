@@ -31,6 +31,17 @@ export async function POST(request) {
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
     const { prompt, style, resolution = '768', videoResolution = '720p', videoTier = 'standard', aspectRatio = '1:1', duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
     const videoTierValue = videoTier === 'cinematic' ? 'cinematic' : 'standard';
+    // Real cost, computed and enforced here (mirrors the display-only copy in
+    // app/page.js's `creditCost` - keep the two in sync). Previously the two
+    // RPC calls below were made with no arguments at all, so they silently
+    // fell back to their `p_credits default 1` and every generation - image
+    // or video, any tier/duration - only ever cost 1 credit.
+    const isVideoWorkflow = workflowMode === 'video' || workflowMode === 'text-video';
+    const videoSecondsForCost = [5, 8, 10].includes(Number(duration)) ? Number(duration) : 5;
+    const videoResolutionForCost = ['720p', '1080p'].includes(videoResolution) ? videoResolution : '720p';
+    const creditCost = isVideoWorkflow
+      ? (videoTierValue === 'cinematic' ? 4 : (videoResolutionForCost === '1080p' ? 8 : 5)) * videoSecondsForCost
+      : 2;
     if (
       ((workflowMode === 'image' || workflowMode === 'edit') && !dashscopeKey) ||
       ((workflowMode === 'video' || workflowMode === 'text-video') && (videoTierValue === 'cinematic' ? !replicateToken : !dashscopeKey))
@@ -47,7 +58,7 @@ export async function POST(request) {
     // be much larger, so clamp it wherever it's sent to Alibaba.
     const dashscopeSeed = safeSeed % 2147483647;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
-    const { error: reserveError } = await db.rpc('reserve_generation_slot');
+    const { error: reserveError } = await db.rpc('reserve_generation_slot', { p_credits: creditCost });
     if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
     let referenceUrl = referenceImage;
     if (referenceImage?.startsWith('data:image/')) {
@@ -79,7 +90,7 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image request failed', { httpStatus: qwenResponse.status, detail });
         return Response.json({ error: `Image generation failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      const { data: qwenCreditData, error: qwenCreditError } = await db.rpc('complete_generation_credit');
+      const { data: qwenCreditData, error: qwenCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (qwenCreditError) {
         console.error('generate2: complete_generation_credit failed', qwenCreditError);
         return Response.json({ image: qwenImageUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
@@ -116,7 +127,7 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image-Edit request failed', { httpStatus: editResponse.status, detail });
         return Response.json({ error: `Image edit failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      const { data: editCreditData, error: editCreditError } = await db.rpc('complete_generation_credit');
+      const { data: editCreditData, error: editCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (editCreditError) {
         console.error('generate2: complete_generation_credit failed', editCreditError);
         return Response.json({ image: editImageUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
