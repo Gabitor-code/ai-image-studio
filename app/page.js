@@ -9,7 +9,10 @@ const samples = [
   ['Dreamscape', 'Floating islands at sunset, rendered with cinematic detail', 'image', '/gallery/floating-islands.webp'],
   ['Light Forms', 'Abstract ribbons of violet, coral and lime light in motion', 'image', '/gallery/light-ribbons.webp'],
   ['Studio Flow', 'A creative workspace with a holographic moodboard at dusk', 'image', '/gallery/creative-workspace.webp'],
-  ['Coastal Drive', 'A chrome sports car on a sunlit Italian coastal road', 'image', '/gallery/coastal-drive.webp']
+  ['Coastal Drive', 'A chrome sports car on a sunlit Italian coastal road', 'image', '/gallery/coastal-drive.webp'],
+  ['First Contact', 'A friendly humanoid robot kneeling to greet a curious little girl on a rooftop at sunset', 'text-video', '/gallery/first-contact.mp4'],
+  ['Neon Skyline', 'A flying car speeding through a neon-lit cyberpunk city at night, giant holographic faces glowing on the towers', 'text-video', '/gallery/neon-skyline.mp4'],
+  ['Rusted Relic', 'A weathered robotic hand lying in the rubble of an abandoned factory, embers flickering nearby', 'text-video', '/gallery/relic-hand.mp4']
 ];
  
 export default function Home() {
@@ -204,7 +207,7 @@ export default function Home() {
     </section>
     <section id="gallery" className="gallery-section">
       <div className="section-title"><p>02 / INSPIRATION</p><h2>Start with an idea.</h2></div><div className="sample-grid">
-      {samples.map(([name, text, kind, image]) => <button key={name} className="sample" style={{ backgroundImage: `url(${image})` }} onClick={() => { setMode(kind); setPrompt(text); document.getElementById('studio').scrollIntoView({ behavior: 'smooth' }); }}><span className="sample-kind">{kind === 'image' ? 'IMAGE' : 'VIDEO'}</span><strong>{name}</strong><i>↗</i></button>)}</div>
+      {samples.map(([name, text, kind, media]) => <button key={name} className="sample" style={kind === 'image' ? { backgroundImage: `url(${media})` } : undefined} onClick={() => { setMode(kind); setPrompt(text); document.getElementById('studio').scrollIntoView({ behavior: 'smooth' }); }}>{kind !== 'image' && <video className="sample-video" src={media} autoPlay loop muted playsInline />}<span className="sample-kind">{kind === 'image' ? 'IMAGE' : 'VIDEO'}</span><strong>{name}</strong><i>↗</i></button>)}</div>
       <button className="gallery-button" onClick={() => setShowGallery(!showGallery)}>{showGallery ? 'Close gallery' : 'Open gallery'} <span>→</span></button>
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}>{(creation.kind === 'video' || creation.kind === 'text-video') ? <video className="creation-media" src={creation.image} controls playsInline preload="metadata" /> : <img className="creation-media" src={creation.image} alt={creation.prompt} />}<div><p>{creation.prompt}</p><a href={creation.image} download={`gabitor-${creation.id}.${(creation.kind === 'video' || creation.kind === 'text-video') ? 'mp4' : 'png'}`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
