@@ -12,6 +12,20 @@ async function readJsonResponse(response) {
   catch { return { status: `HTTP_${response.status}`, error: body.slice(0, 500) }; }
 }
 
+// Records which user a submitted video job belongs to, and at what cost, so
+// /api/video-status can verify ownership before ever handing the finished
+// video back to whoever asks for it by jobId (jobId alone proves nothing -
+// it's provider data, not a secret) and can charge the job's own cost
+// instead of a single shared "pending" slot on the profile (which would get
+// clobbered if a user started a second generation before the first
+// finished). Non-fatal: if this insert fails, the video will still
+// generate and video-status will surface a clear "not found" for it rather
+// than silently letting anyone else claim it.
+async function recordVideoJob(db, jobId, provider, credits) {
+  const { error } = await db.rpc('record_video_job', { p_job_id: jobId, p_provider: provider, p_credits: credits });
+  if (error) console.error('generate2: record_video_job failed', { jobId, provider, error });
+}
+
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -159,6 +173,7 @@ export async function POST(request) {
           console.error('generate2: Replicate/Kling text-to-video submit failed', { httpStatus: klingResponse.status, detail });
           return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
         }
+        await recordVideoJob(db, klingData.id, 'replicate', creditCost);
         return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
       }
 
@@ -178,6 +193,7 @@ export async function POST(request) {
         console.error('generate2: Alibaba/Wan text-to-video submit failed', { httpStatus: t2vResponse.status, detail });
         return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
+      await recordVideoJob(db, t2vData.output.task_id, 'alibaba', creditCost);
       return Response.json({ pending: true, jobId: t2vData.output.task_id, provider: 'alibaba' }, { status: 202 });
     }
     // workflowMode === 'video' from here on.
@@ -209,6 +225,7 @@ export async function POST(request) {
       }
       // Replicate jobs are never instant - hand back the prediction id and
       // which provider it came from, so the frontend can poll the right one.
+      await recordVideoJob(db, klingData.id, 'replicate', creditCost);
       return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
     }
 
@@ -225,6 +242,7 @@ export async function POST(request) {
       console.error('generate2: Alibaba/Wan video submit failed', { httpStatus: wanResponse.status, detail });
       return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
     }
+    await recordVideoJob(db, wanData.output.task_id, 'alibaba', creditCost);
     return Response.json({ pending: true, jobId: wanData.output.task_id, provider: 'alibaba' }, { status: 202 });
   } catch { return Response.json({ error: 'Unable to generate an image right now. Your credit was not used.' }, { status: 500 }); }
 }

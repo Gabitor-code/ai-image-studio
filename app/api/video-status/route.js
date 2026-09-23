@@ -91,12 +91,22 @@ export async function GET(request) {
       return Response.json({ error: 'Video generation finished but no video was returned.' }, { status: 502 });
     }
  
-    const { data: creditData, error: creditError } = await db.rpc('complete_generation_credit');
+    // complete_video_job() both verifies that this job belongs to the
+    // signed-in user (previously nothing did - a jobId is provider data, not
+    // a secret, so without this check anyone who learned or guessed another
+    // user's jobId could poll this endpoint and get back their video) and
+    // charges that job's own recorded cost, rather than a single "pending"
+    // slot shared across all of a user's in-flight generations.
+    const { data: creditData, error: creditError } = await db.rpc('complete_video_job', { p_job_id: jobId });
     if (creditError) {
+      if (creditError.message?.includes('JOB_NOT_FOUND')) {
+        console.error('video-status: job not found or not owned by caller', { jobId, provider });
+        return Response.json({ error: 'This video could not be found for your account.' }, { status: 404 });
+      }
       // The video generated successfully and the provider was already paid for
       // it - never throw that away just because the credit bookkeeping failed.
       // Show the user their video and only warn about the credit separately.
-      console.error('video-status: complete_generation_credit failed', { jobId, creditError });
+      console.error('video-status: complete_video_job failed', { jobId, creditError });
       return Response.json({ ready: true, video, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
     }
     return Response.json({ ready: true, video, remainingCredits: creditData?.remaining_credits });
