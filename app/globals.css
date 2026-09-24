@@ -50,7 +50,7 @@
 .send-btn:disabled{opacity:.6;cursor:wait}
 .settings-panel{border-radius:22px;border:1px solid #343744;margin-top:-2px}
 .result-image{background:#14151f;border:1px solid #2d2f3d;border-radius:22px;padding:14px}
-.result-image img,.result-image video{border-radius:14px}
+.result-image img,.result-image video{display:block;width:100%;height:auto;max-height:80vh;object-fit:contain;border-radius:14px}
 .notice{color:#c7cad6;font-size:13px;margin:0}
 @media(max-width:560px){.prompt-bar{border-radius:22px;padding:14px}.mode-pills .pill{padding:7px 12px;font-size:12px}}
 
