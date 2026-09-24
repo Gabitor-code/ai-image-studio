@@ -97,7 +97,11 @@ export async function GET(request) {
     // user's jobId could poll this endpoint and get back their video) and
     // charges that job's own recorded cost, rather than a single "pending"
     // slot shared across all of a user's in-flight generations.
-    const { data: creditData, error: creditError } = await db.rpc('complete_video_job', { p_job_id: jobId });
+    // Passing the finished video's URL lets complete_video_job() also write
+    // a row into `generations` (the account-level gallery) now that the
+    // output actually exists - the pending video_jobs row only ever had the
+    // job id/prompt, never the finished media.
+    const { data: creditData, error: creditError } = await db.rpc('complete_video_job', { p_job_id: jobId, p_output_path: video });
     if (creditError) {
       if (creditError.message?.includes('JOB_NOT_FOUND')) {
         console.error('video-status: job not found or not owned by caller', { jobId, provider });

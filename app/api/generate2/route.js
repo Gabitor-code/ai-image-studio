@@ -23,9 +23,19 @@ async function readJsonResponse(response) {
 // finished). Non-fatal: if this insert fails, the video will still
 // generate and video-status will surface a clear "not found" for it rather
 // than silently letting anyone else claim it.
-async function recordVideoJob(db, jobId, provider, credits) {
-  const { error } = await db.rpc('record_video_job', { p_job_id: jobId, p_provider: provider, p_credits: credits });
+async function recordVideoJob(db, jobId, provider, credits, prompt) {
+  const { error } = await db.rpc('record_video_job', { p_job_id: jobId, p_provider: provider, p_credits: credits, p_prompt: prompt });
   if (error) console.error('generate2: record_video_job failed', { jobId, provider, error });
+}
+
+// Persists a synchronous (image/edit) generation into the `generations`
+// table right away, since we already know its output URL - this is what
+// makes "My creations" an actual account-level gallery instead of the
+// per-browser localStorage cache it used to be. Non-fatal: a logging
+// failure here should never stop the user from getting their image back.
+async function recordGeneration(db, prompt, mediaType, outputPath) {
+  const { error } = await db.rpc('record_generation', { p_prompt: prompt, p_media_type: mediaType, p_output_path: outputPath });
+  if (error) console.error('generate2: record_generation failed', { mediaType, error });
 }
 
 export async function POST(request) {
@@ -116,6 +126,7 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image request failed', { httpStatus: qwenResponse.status, detail });
         return Response.json({ error: `Image generation failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
+      await recordGeneration(db, finalPrompt, 'image', qwenImageUrl);
       const { data: qwenCreditData, error: qwenCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (qwenCreditError) {
         console.error('generate2: complete_generation_credit failed', qwenCreditError);
@@ -153,6 +164,7 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image-Edit request failed', { httpStatus: editResponse.status, detail });
         return Response.json({ error: `Image edit failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
+      await recordGeneration(db, finalPrompt, 'image', editImageUrl);
       const { data: editCreditData, error: editCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (editCreditError) {
         console.error('generate2: complete_generation_credit failed', editCreditError);
@@ -185,7 +197,7 @@ export async function POST(request) {
           console.error('generate2: Replicate/Kling text-to-video submit failed', { httpStatus: klingResponse.status, detail });
           return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
         }
-        await recordVideoJob(db, klingData.id, 'replicate', creditCost);
+        await recordVideoJob(db, klingData.id, 'replicate', creditCost, videoPrompt);
         return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
       }
 
@@ -205,7 +217,7 @@ export async function POST(request) {
         console.error('generate2: Alibaba/Wan text-to-video submit failed', { httpStatus: t2vResponse.status, detail });
         return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      await recordVideoJob(db, t2vData.output.task_id, 'alibaba', creditCost);
+      await recordVideoJob(db, t2vData.output.task_id, 'alibaba', creditCost, videoPrompt);
       return Response.json({ pending: true, jobId: t2vData.output.task_id, provider: 'alibaba' }, { status: 202 });
     }
     // workflowMode === 'video' from here on.
@@ -237,7 +249,7 @@ export async function POST(request) {
       }
       // Replicate jobs are never instant - hand back the prediction id and
       // which provider it came from, so the frontend can poll the right one.
-      await recordVideoJob(db, klingData.id, 'replicate', creditCost);
+      await recordVideoJob(db, klingData.id, 'replicate', creditCost, videoPrompt);
       return Response.json({ pending: true, jobId: klingData.id, provider: 'replicate' }, { status: 202 });
     }
 
@@ -254,7 +266,7 @@ export async function POST(request) {
       console.error('generate2: Alibaba/Wan video submit failed', { httpStatus: wanResponse.status, detail });
       return Response.json({ error: `Video generation failed to start: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
     }
-    await recordVideoJob(db, wanData.output.task_id, 'alibaba', creditCost);
+    await recordVideoJob(db, wanData.output.task_id, 'alibaba', creditCost, videoPrompt);
     return Response.json({ pending: true, jobId: wanData.output.task_id, provider: 'alibaba' }, { status: 202 });
   } catch { return Response.json({ error: 'Unable to generate an image right now. Your credit was not used.' }, { status: 500 }); }
 }
