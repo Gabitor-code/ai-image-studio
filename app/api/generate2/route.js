@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import { moderatePromptText, MODERATION_MESSAGE } from '../../lib/moderation';
+import { sendModerationAlert } from '../../lib/notify';
 
 export const maxDuration = 60;
 
@@ -61,6 +63,16 @@ export async function POST(request) {
       ((workflowMode === 'video' || workflowMode === 'text-video') && (videoTierValue === 'cinematic' ? !replicateToken : !dashscopeKey))
     ) return Response.json({ error: 'This workflow is not configured yet.' }, { status: 503 });
     if (!prompt || typeof prompt !== 'string' || prompt.length > 1000) return Response.json({ error: 'Please provide an image description up to 1,000 characters.' }, { status: 400 });
+    // Keyword content-policy check, before any credit is touched or any
+    // provider is called - see app/lib/moderation.js for what this does and
+    // does not catch. A match emails a review alert (app/lib/notify.js) and
+    // rejects the request outright.
+    const moderationMatch = moderatePromptText(prompt, negativePrompt);
+    if (moderationMatch) {
+      console.error('generate2: prompt blocked by content filter', { userId: user.id, ...moderationMatch });
+      await sendModerationAlert({ userId: user.id, userEmail: user.email, ...moderationMatch, prompt, negativePrompt });
+      return Response.json({ error: MODERATION_MESSAGE }, { status: 400 });
+    }
     if (workflowMode === 'edit' && !referenceImage) return Response.json({ error: 'Please upload a reference image for image-to-image editing.' }, { status: 400 });
     const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
