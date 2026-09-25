@@ -18,7 +18,18 @@ const ALLOWED_HOST_SUFFIXES = [
   'aliyuncs.com',
 ];
 
+// Generated images/videos are now also re-hosted on our own Supabase
+// Storage bucket (see persistGeneratedMedia in generate2/route.js and
+// video-status/route.js) - that host has to be allowed here too, or every
+// download of a persisted file gets rejected as "not allowed". Read from
+// the same env var the rest of the app uses instead of hardcoding the
+// project ref, so this keeps working if the Supabase project ever changes.
+const SUPABASE_STORAGE_HOST = (() => {
+  try { return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || '').hostname; } catch { return null; }
+})();
+
 function isAllowedHost(hostname) {
+  if (SUPABASE_STORAGE_HOST && hostname === SUPABASE_STORAGE_HOST) return true;
   return ALLOWED_HOST_SUFFIXES.some(suffix => hostname === suffix.replace(/^\./, '') || hostname.endsWith(suffix));
 }
 
