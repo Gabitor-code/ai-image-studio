@@ -1,8 +1,8 @@
 'use client';
- 
+
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
- 
+
 // Generated images/videos are served from Replicate's or Alibaba's own CDN,
 // a different origin from this site - browsers silently ignore the <a
 // download> attribute for cross-origin URLs, so the link would just open or
@@ -26,7 +26,7 @@ const samples = [
   ['Neon AI City', 'Epic aerial drone shot flying through a massive cyberpunk megacity at night, towering skyscrapers covered in neon holograms and giant AI faces made of light. Flying cars stream between buildings, rain reflects pink and cyan lights on glass surfaces. A glowing neural-network pattern pulses across the entire skyline like a living brain. Fast smooth camera glide, cinematic wide angle, ultra-detailed, futuristic, 4K, high contrast, atmospheric fog.', 'text-video', '/gallery/neon-skyline.mp4'],
   ['First Contact', 'A small girl in a yellow raincoat stands on a quiet rooftop at sunset, facing a tall sleek white android with a softly glowing blue core in its chest. The robot slowly kneels down and gently opens its metal hand, revealing a tiny holographic flower that blooms in light. Warm golden hour lighting mixed with soft blue sci-fi glow, city skyline in the background, gentle wind moving her hair. Slow orbiting camera, emotional, cinematic, shallow depth of field, 4K, Pixar-meets-realism aesthetic.', 'text-video', '/gallery/first-contact.mp4']
 ];
- 
+
 export default function Home() {
   const [mode, setMode] = useState('image');
   const [prompt, setPrompt] = useState('');
@@ -57,21 +57,21 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
- 
+
   async function readApiResponse(response) {
     const body = await response.text();
     if (!body) return {};
     try { return JSON.parse(body); }
     catch { return { error: response.ok ? 'The server returned an invalid response.' : `Server error (${response.status}). Please try again shortly.` }; }
   }
- 
+
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, []);
- 
+
   useEffect(() => {
     if (!supabase || !user) { setCredits(null); return; }
     let active = true;
@@ -96,12 +96,12 @@ export default function Home() {
     ensureProfile();
     return () => { active = false; };
   }, [user]);
- 
+
   useEffect(() => {
     if (!user) { setCreations([]); return; }
     try { setCreations(JSON.parse(localStorage.getItem(`gabitor-creations-${user.id}`) || '[]')); } catch { setCreations([]); }
   }, [user]);
- 
+
   async function submitAuth(event) {
     event.preventDefault();
     if (!supabase) { setAuthMessage('Account access is being configured. Please try again shortly.'); return; }
@@ -115,7 +115,7 @@ export default function Home() {
     setAuthOpen(false); setPassword('');
     setNotice(authMode === 'signup' ? 'Your account is ready. Welcome to Gabitor.' : 'You are signed in.');
   }
- 
+
   async function signOut() { await supabase?.auth.signOut(); setNotice('You have been signed out.'); }
   async function buyCredits(plan) {
     if (!user) { openSignup(); return; }
@@ -170,7 +170,7 @@ export default function Home() {
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
   }
- 
+
   const settingsSummary = isVideoLike ? `${videoTier === 'cinematic' ? 'Cinematic' : videoResolution} · ${duration}s` : `${resolution}px · ${quality === 'standard' ? 'Standard' : 'High detail'}`;
   // Mirrors the server-side cost table in app/api/generate2/route.js - keep
   // the two in sync. This is display-only; the API always recomputes and
@@ -180,11 +180,11 @@ export default function Home() {
   const creditCost = isVideoLike
     ? (videoTier === 'cinematic' ? 4 : (videoResolution === '1080p' ? 8 : 5)) * (([5, 8, 10].includes(Number(duration)) ? Number(duration) : 5))
     : 2;
- 
+
   function pillGroup(options, value, onChange) {
     return <div className="pill-group">{options.map(option => <button type="button" key={option.value} className={value === option.value ? 'pill-opt active' : 'pill-opt'} onClick={() => onChange(option.value)}>{option.label}</button>)}</div>;
   }
- 
+
   return <main>
     <nav className="nav">
       <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a>
@@ -225,7 +225,7 @@ export default function Home() {
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}>{(creation.kind === 'video' || creation.kind === 'text-video') ? <video className="creation-media" src={creation.image} controls playsInline preload="metadata" /> : <img className="creation-media" src={creation.image} alt={creation.prompt} />}<div><p>{creation.prompt}</p><a href={downloadHref(creation.image, `gabitor-${creation.id}.${(creation.kind === 'video' || creation.kind === 'text-video') ? 'mp4' : 'png'}`)} download={`gabitor-${creation.id}.${(creation.kind === 'video' || creation.kind === 'text-video') ? 'mp4' : 'png'}`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
     <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>200 credits</strong><span>~100 images or ~50 sec of video · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>550 credits</strong><span>~275 images or ~137 sec of video · Private creations · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>1200 credits</strong><span>~600 images or ~300 sec of video · Private creations · Best value</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
-    <footer><div className="footer-top"><a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a><div className="footer-links"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a></div></div><p className="footer-copyright">© 2026 Gabitor AI</p></footer>
+    <footer><div className="footer-top"><a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a><div className="footer-links"><a href="/ai-product-photography-generator">gabitorai.com/ai-product-photography-generator</a><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a></div></div><p className="footer-copyright">© 2026 Gabitor AI</p></footer>
     {authOpen && <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Account access"><form className="auth-card" onSubmit={submitAuth}>
       <button type="button" className="auth-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button><p className="eyebrow">GABITOR ACCOUNT</p>
       <h2>{authMode === 'signup' ? 'Start creating.' : 'Welcome back.'}</h2><p>{authMode === 'signup' ? 'Register now and receive 15 free credits.' : 'Sign in to access your credits and creations.'}</p>
