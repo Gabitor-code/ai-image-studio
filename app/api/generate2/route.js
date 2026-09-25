@@ -38,6 +38,31 @@ async function recordGeneration(db, prompt, mediaType, outputPath) {
   if (error) console.error('generate2: record_generation failed', { mediaType, error });
 }
 
+
+// Copies a provider's temporary image/video URL (Alibaba/Replicate links can
+// expire or be revoked - see the comments on each provider call below) into
+// our own "generated-media" Storage bucket, so "My creations" and the
+// generations table always point at a URL we control instead of a
+// temporary provider link. Non-fatal: any failure here just falls back to
+// the original (temporary) URL rather than failing the whole generation -
+// the user still gets their image or video back either way.
+async function persistGeneratedMedia(db, userId, sourceUrl, mediaType) {
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) throw new Error(`HTTP_${response.status}`);
+    const contentType = response.headers.get('content-type') || (mediaType === 'video' ? 'video/mp4' : 'image/png');
+    const ext = mediaType === 'video' ? 'mp4' : (contentType.split('/')[1] || 'png').split(';')[0].replace('jpeg', 'jpg');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await db.storage.from('generated-media').upload(path, bytes, { contentType, upsert: false });
+    if (uploadError) throw uploadError;
+    return db.storage.from('generated-media').getPublicUrl(path).data.publicUrl;
+  } catch (error) {
+    console.error('generate2: persistGeneratedMedia failed, falling back to provider URL', { mediaType, error });
+    return sourceUrl;
+  }
+}
+
 export async function POST(request) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -126,13 +151,14 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image request failed', { httpStatus: qwenResponse.status, detail });
         return Response.json({ error: `Image generation failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      await recordGeneration(db, finalPrompt, 'image', qwenImageUrl);
+      const qwenPersistedUrl = await persistGeneratedMedia(db, user.id, qwenImageUrl, 'image');
+      await recordGeneration(db, finalPrompt, 'image', qwenPersistedUrl);
       const { data: qwenCreditData, error: qwenCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (qwenCreditError) {
         console.error('generate2: complete_generation_credit failed', qwenCreditError);
-        return Response.json({ image: qwenImageUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
+        return Response.json({ image: qwenPersistedUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
       }
-      return Response.json({ image: qwenImageUrl, remainingCredits: qwenCreditData?.remaining_credits });
+      return Response.json({ image: qwenPersistedUrl, remainingCredits: qwenCreditData?.remaining_credits });
     }
     if (workflowMode === 'edit') {
       // Qwen-Image-Edit (Alibaba Cloud Model Studio) - synchronous
@@ -164,13 +190,14 @@ export async function POST(request) {
         console.error('generate2: Qwen-Image-Edit request failed', { httpStatus: editResponse.status, detail });
         return Response.json({ error: `Image edit failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}` }, { status: 502 });
       }
-      await recordGeneration(db, finalPrompt, 'image', editImageUrl);
+      const editPersistedUrl = await persistGeneratedMedia(db, user.id, editImageUrl, 'image');
+      await recordGeneration(db, finalPrompt, 'image', editPersistedUrl);
       const { data: editCreditData, error: editCreditError } = await db.rpc('complete_generation_credit', { p_credits: creditCost });
       if (editCreditError) {
         console.error('generate2: complete_generation_credit failed', editCreditError);
-        return Response.json({ image: editImageUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
+        return Response.json({ image: editPersistedUrl, creditWarning: 'Your image is ready, but we could not finalize the credit for it.' });
       }
-      return Response.json({ image: editImageUrl, remainingCredits: editCreditData?.remaining_credits });
+      return Response.json({ image: editPersistedUrl, remainingCredits: editCreditData?.remaining_credits });
     }
     if (workflowMode === 'text-video') {
       // Same async task-based flow as image-to-video below (poll
