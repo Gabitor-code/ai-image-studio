@@ -1,4 +1,29 @@
 import { createClient } from '@supabase/supabase-js';
+
+export const maxDuration = 60;
+
+// Copies a provider's temporary video URL (Alibaba/Replicate links can
+// expire or be revoked) into our own "generated-media" Storage bucket, so
+// "My creations" and the generations table always point at a URL we
+// control instead of a temporary provider link. Non-fatal: any failure
+// here just falls back to the original (temporary) URL rather than failing
+// the whole request - the user still gets their video back either way.
+async function persistGeneratedMedia(db, userId, sourceUrl, mediaType) {
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) throw new Error(`HTTP_${response.status}`);
+    const contentType = response.headers.get('content-type') || (mediaType === 'video' ? 'video/mp4' : 'image/png');
+    const ext = mediaType === 'video' ? 'mp4' : (contentType.split('/')[1] || 'png').split(';')[0].replace('jpeg', 'jpg');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await db.storage.from('generated-media').upload(path, bytes, { contentType, upsert: false });
+    if (uploadError) throw uploadError;
+    return db.storage.from('generated-media').getPublicUrl(path).data.publicUrl;
+  } catch (error) {
+    console.error('video-status: persistGeneratedMedia failed, falling back to provider URL', { mediaType, error });
+    return sourceUrl;
+  }
+}
  
 async function readJsonResponse(response) {
   const body = await response.text();
@@ -101,7 +126,9 @@ export async function GET(request) {
     // a row into `generations` (the account-level gallery) now that the
     // output actually exists - the pending video_jobs row only ever had the
     // job id/prompt, never the finished media.
-    const { data: creditData, error: creditError } = await db.rpc('complete_video_job', { p_job_id: jobId, p_output_path: video });
+    const persistedVideo = await persistGeneratedMedia(db, user.id, video, 'video');
+
+    const { data: creditData, error: creditError } = await db.rpc('complete_video_job', { p_job_id: jobId, p_output_path: persistedVideo });
     if (creditError) {
       if (creditError.message?.includes('JOB_NOT_FOUND')) {
         console.error('video-status: job not found or not owned by caller', { jobId, provider });
@@ -111,9 +138,9 @@ export async function GET(request) {
       // it - never throw that away just because the credit bookkeeping failed.
       // Show the user their video and only warn about the credit separately.
       console.error('video-status: complete_video_job failed', { jobId, creditError });
-      return Response.json({ ready: true, video, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
+      return Response.json({ ready: true, video: persistedVideo, creditWarning: 'Your video is ready, but we could not finalize the credit for it.' });
     }
-    return Response.json({ ready: true, video, remainingCredits: creditData?.remaining_credits });
+    return Response.json({ ready: true, video: persistedVideo, remainingCredits: creditData?.remaining_credits });
   } catch { return Response.json({ error: 'Unable to check the video right now.' }, { status: 500 }); }
 }
  
