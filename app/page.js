@@ -97,10 +97,19 @@ export default function Home() {
     return () => { active = false; };
   }, [user]);
 
-  useEffect(() => {
-    if (!user) { setCreations([]); return; }
-    try { setCreations(JSON.parse(localStorage.getItem(`gabitor-creations-${user.id}`) || '[]')); } catch { setCreations([]); }
-  }, [user]);
+  // "My creations" reads from the `generations` table instead of
+  // localStorage, so it's an account-level gallery that shows the same
+  // creations no matter which device or browser the user signs in from.
+  // RLS ("own generations read") already scopes this to the signed-in
+  // user, but filtering by user_id here too keeps the intent explicit.
+  async function refreshCreations(forUser) {
+    if (!supabase || !forUser) { setCreations([]); return; }
+    const { data, error } = await supabase.from('generations').select('id, prompt, media_type, output_path, created_at').eq('user_id', forUser.id).order('created_at', { ascending: false }).limit(12);
+    if (error) { setCreations([]); return; }
+    setCreations((data || []).map(row => ({ id: row.id, image: row.output_path, prompt: row.prompt, createdAt: row.created_at, kind: row.media_type })));
+  }
+
+  useEffect(() => { refreshCreations(user); }, [user]);
 
   async function submitAuth(event) {
     event.preventDefault();
@@ -164,8 +173,7 @@ export default function Home() {
       if (!response.ok && !data.ready) throw new Error(data.error || 'Image generation failed.');
       setImage(isVideoLike ? data.video : data.image);
       if (typeof data.remainingCredits === 'number') setCredits(data.remainingCredits);
-      const creation = { id: Date.now(), image: isVideoLike ? data.video : data.image, prompt: prompt.trim(), createdAt: new Date().toISOString(), kind: mode };
-      setCreations(previous => { const next = [creation, ...previous].slice(0, 12); try { localStorage.setItem(`gabitor-creations-${user.id}`, JSON.stringify(next)); } catch {} return next; });
+      await refreshCreations(user);
       setNotice(data.creditWarning || (isVideoLike ? 'Your video is ready.' : 'Your image is ready.'));
     } catch (error) { setNotice(error.message || 'Image generation failed. Please try again.'); }
     finally { setGenerating(false); }
