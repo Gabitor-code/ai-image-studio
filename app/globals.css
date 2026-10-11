@@ -72,3 +72,4 @@ footer{flex-direction:column;align-items:stretch;gap:16px}
 .footer-top{display:flex;justify-content:space-between;align-items:center;width:100%}
 .footer-copyright{margin:0;width:100%;text-align:center;color:#9da2b4}
 @media(max-width:640px){.footer-top{flex-wrap:wrap;gap:10px;justify-content:center;text-align:center}}
+.upload-trigger.secondary-upload{background:#fff;border-style:dashed}.reference-hint{font-size:11px;color:#777;line-height:1.4}
