@@ -80,7 +80,7 @@ export async function POST(request) {
     const supabase = createClient(url, anon);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return Response.json({ error: 'Your sign-in session has expired. Please sign in again.' }, { status: 401 });
-    const { prompt, style, resolution = '768', videoResolution = '720p', videoTier = 'standard', aspectRatio = '1:1', duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
+    const { prompt, style, resolution = '768', videoResolution = '720p', videoTier = 'standard', aspectRatio = '1:1', duration = 5, motion = 'medium', negativePrompt = '', seed = -1, referenceImage, extraReferenceImages = [], workflowMode = referenceImage ? 'edit' : 'image' } = await request.json();
     const videoTierValue = videoTier === 'cinematic' ? 'cinematic' : 'standard';
     // Real cost, computed and enforced here (mirrors the display-only copy in
     // app/page.js's `creditCost` - keep the two in sync). Previously the two
@@ -109,7 +109,12 @@ export async function POST(request) {
       return Response.json({ error: MODERATION_MESSAGE }, { status: 400 });
     }
     if (workflowMode === 'edit' && !referenceImage) return Response.json({ error: 'Please upload a reference image for image-to-image editing.' }, { status: 400 });
-    const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ' : ''}${prompt}`;
+    // Image to image can combine up to 3 images: the main reference plus up to
+    // 2 extra ones (qwen-image-3.0-pro accepts 1-3 input images). Only inline
+    // data:image uploads are accepted here, never arbitrary URLs.
+    const extraImages = workflowMode === 'edit' && Array.isArray(extraReferenceImages) ? extraReferenceImages.filter(item => typeof item === 'string' && item.startsWith('data:image/')).slice(0, 2) : [];
+    if (extraImages.some(item => item.length > 6_000_000)) return Response.json({ error: 'One of the extra images is too large. Please use a smaller image.' }, { status: 400 });
+    const finalPrompt = `${style && style !== 'None' ? `${style} style, ` : ''}${referenceImage ? (extraImages.length ? `You are given ${extraImages.length + 1} reference images (image 1 is the main one). Combine them exactly as the instruction says, keeping each subject and its clothing recognizable. ` : 'Keep the original subject identity and clothing recognizable, while clearly transforming the requested atmosphere, lighting, and environment. ') : ''}${prompt}`;
     const size = ['512', '768', '1024'].includes(String(resolution)) ? Number(resolution) : 768;
     const ratio = aspectRatio === '16:9' ? [size, Math.round(size * 9 / 16)] : aspectRatio === '9:16' ? [Math.round(size * 9 / 16), size] : [size, size];
     const [width, height] = ratio;
@@ -121,16 +126,29 @@ export async function POST(request) {
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const { error: reserveError } = await db.rpc('reserve_generation_slot', { p_credits: creditCost });
     if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
-    let referenceUrl = referenceImage;
-    if (referenceImage?.startsWith('data:image/')) {
-      const match = referenceImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
-      if (!match) return Response.json({ error: 'The reference image format is invalid.' }, { status: 400 });
+    // Stores an inline data:image upload in the public "references" bucket and
+    // returns its URL (the providers fetch reference images by URL).
+    async function storeReference(dataUrl, suffix = '') {
+      const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (!match) return { error: Response.json({ error: 'The reference image format is invalid.' }, { status: 400 }) };
       const ext = match[1].split('/')[1].replace('jpeg', 'jpg');
-      const path = `${user.id}/${Date.now()}.${ext}`;
+      const path = `${user.id}/${Date.now()}${suffix}.${ext}`;
       const bytes = Buffer.from(match[2], 'base64');
       const { error: uploadError } = await db.storage.from('references').upload(path, bytes, { contentType: match[1], upsert: false });
-      if (uploadError) return Response.json({ error: 'Reference image storage is not configured yet. Please create a public "references" bucket in Supabase.' }, { status: 503 });
-      referenceUrl = db.storage.from('references').getPublicUrl(path).data.publicUrl;
+      if (uploadError) return { error: Response.json({ error: 'Reference image storage is not configured yet. Please create a public "references" bucket in Supabase.' }, { status: 503 }) };
+      return { url: db.storage.from('references').getPublicUrl(path).data.publicUrl };
+    }
+    let referenceUrl = referenceImage;
+    if (referenceImage?.startsWith('data:image/')) {
+      const stored = await storeReference(referenceImage);
+      if (stored.error) return stored.error;
+      referenceUrl = stored.url;
+    }
+    const extraReferenceUrls = [];
+    for (const [index, dataUrl] of extraImages.entries()) {
+      const stored = await storeReference(dataUrl, `-${index + 2}`);
+      if (stored.error) return stored.error;
+      extraReferenceUrls.push(stored.url);
     }
     if (workflowMode === 'image') {
       // Qwen-Image-3.0 (Alibaba Cloud Model Studio) - synchronous text-to-image.
@@ -176,10 +194,13 @@ export async function POST(request) {
       // "Qwen-Image-Edit-2511", which is not a DashScope model id) and its
       // official per-image price (~$0.045, international region) lands in
       // the same bracket as qwen-image-3.0-pro's 1K price ($0.04) above.
-      const editModel = process.env.DASHSCOPE_EDIT_MODEL || 'qwen-image-edit';
+      // 2026-10: Alibaba retired qwen-image-edit ("Model not exist"). The
+      // current qwen-image-3.0-pro uses the same model id for generation and
+      // editing and accepts 1-3 input images.
+      const editModel = process.env.DASHSCOPE_EDIT_MODEL || 'qwen-image-3.0-pro';
       const editBody = {
         model: editModel,
-        input: { messages: [{ role: 'user', content: [{ image: referenceUrl }, { text: finalPrompt }] }] },
+        input: { messages: [{ role: 'user', content: [{ image: referenceUrl }, ...extraReferenceUrls.map(image => ({ image })), { text: finalPrompt }] }] },
         parameters: { n: 1, size: `${width}*${height}`, seed: dashscopeSeed, watermark: false, ...(negativePrompt ? { negative_prompt: negativePrompt } : {}) }
       };
       const editResponse = await fetch(`${dashscopeBase}/api/v1/services/aigc/multimodal-generation/generation`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashscopeKey }, body: JSON.stringify(editBody) });
