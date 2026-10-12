@@ -2,7 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { moderatePromptText, MODERATION_MESSAGE } from '../../lib/moderation';
 import { sendModerationAlert } from '../../lib/notify';
 
-export const maxDuration = 60;
+// Image edits with qwen-image-3.0-pro can take longer than 60 s (that limit
+// produced 504s); Vercel Hobby with Fluid compute allows up to 300 s.
+export const maxDuration = 300;
 
 // Shared by every provider below (Alibaba Cloud Model Studio, Replicate) -
 // they all return plain JSON bodies, and this keeps a bad/non-JSON error
@@ -125,7 +127,7 @@ export async function POST(request) {
     const dashscopeSeed = safeSeed % 2147483647;
     const db = createClient(url, anon, { global: { headers: { Authorization: 'Bearer ' + token } } });
     const { error: reserveError } = await db.rpc('reserve_generation_slot', { p_credits: creditCost });
-    if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : 'Unable to verify your credits right now.' }, { status: 429 });
+    if (reserveError) return Response.json({ error: reserveError.message.includes('INSUFFICIENT_CREDITS') ? 'You do not have enough credits to generate an image.' : reserveError.message.includes('RATE_LIMITED') ? 'Please wait a few seconds before starting another generation.' : 'Unable to verify your credits right now.' }, { status: 429 });
     // Stores an inline data:image upload in the public "references" bucket and
     // returns its URL (the providers fetch reference images by URL).
     async function storeReference(dataUrl, suffix = '') {
