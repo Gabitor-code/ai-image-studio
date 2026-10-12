@@ -54,6 +54,9 @@ export default function Home() {
   const [seed, setSeed] = useState('-1');
   const [referenceImage, setReferenceImage] = useState('');
   const [referenceName, setReferenceName] = useState('');
+  // Image to image: up to 2 extra reference images next to the main one (3 total),
+  // all sent to the same edit request so the model can combine them.
+  const [extraReferences, setExtraReferences] = useState([]);
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
@@ -140,6 +143,37 @@ export default function Home() {
   }
   function openSignup() { setAuthMode('signup'); setAuthMessage(''); setAuthOpen(true); }
   const isVideoLike = mode === 'video' || mode === 'text-video';
+  // Downscale uploads for Image to image so three photos stay well under
+  // Vercel's 4.5 MB request limit (longest side 1600 px, JPEG).
+  function readImageFile(file, downscale) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Could not read the image.'));
+      reader.onload = () => {
+        const dataUrl = String(reader.result);
+        if (!downscale) { resolve(dataUrl); return; }
+        const img = new window.Image();
+        img.onerror = () => resolve(dataUrl);
+        img.onload = () => {
+          const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.9));
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  async function addExtraReferences(files) {
+    const room = 2 - extraReferences.length;
+    const picked = Array.from(files || []).slice(0, Math.max(0, room));
+    if (!picked.length) { setNotice('You can use up to 3 images for Image to image.'); return; }
+    const loaded = await Promise.all(picked.map(async file => ({ name: file.name, data: await readImageFile(file, true) })));
+    setExtraReferences(current => [...current, ...loaded].slice(0, 2));
+  }
   async function generate() {
     if (!user) { setAuthMode('signup'); setAuthMessage('Create an account to start generating.'); setAuthOpen(true); return; }
     if (!prompt.trim()) { setNotice('Start by writing a short description.'); return; }
@@ -148,7 +182,7 @@ export default function Home() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again to generate.');
-      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, videoResolution, videoTier, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', workflowMode: mode === 'video' ? 'video' : mode === 'text-video' ? 'text-video' : mode === 'image-edit' ? 'edit' : 'image' }) });
+      const response = await fetch('/api/generate2', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ prompt: prompt.trim(), resolution, quality, videoResolution, videoTier, style, aspectRatio, referenceStrength: Number(referenceStrength), duration: Number(duration), motion, negativePrompt, seed: Number(seed), referenceImage: (mode === 'image-edit' || mode === 'video') ? referenceImage : '', extraReferenceImages: mode === 'image-edit' ? extraReferences.map(item => item.data) : [], workflowMode: mode === 'video' ? 'video' : mode === 'text-video' ? 'text-video' : mode === 'image-edit' ? 'edit' : 'image' }) });
       let data = await readApiResponse(response);
       if (isVideoLike && response.status === 202 && data.pending && data.jobId) {
         setNotice('Video is queued. Waiting for an available worker…');        const videoJobId = data.jobId;
@@ -221,7 +255,7 @@ export default function Home() {
           <button className="send-btn" disabled={generating} onClick={generate} aria-label="Generate">{generating ? '···' : '↑'}</button>
         </div>
       </div>
-      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{(mode === 'video' || mode === 'text-video') && <label>Engine{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'cinematic', label: 'Cinematic' }], videoTier, setVideoTier)}</label>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); const reader = new FileReader(); reader.onload = () => setReferenceImage(String(reader.result)); reader.readAsDataURL(file); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{(mode === 'video' || mode === 'text-video') && <><label>Duration{pillGroup(videoTier === 'cinematic' ? [{ value: '5', label: '5s' }, { value: '10', label: '10s' }] : [{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && mode !== 'text-video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && mode !== 'text-video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'standard' && <label>Resolution{pillGroup([{ value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }], videoResolution, setVideoResolution)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'cinematic' && <p className="hint">Cinematic mode picks its own resolution automatically (up to 1080p).</p>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
+      {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{(mode === 'video' || mode === 'text-video') && <label>Engine{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'cinematic', label: 'Cinematic' }], videoTier, setVideoTier)}</label>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference image'}</span><label className="upload-trigger">{referenceImage ? 'Change image' : 'Upload image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; setReferenceName(file.name); readImageFile(file, mode === 'image-edit').then(setReferenceImage).catch(error => setNotice(error.message)); }} /></label>{referenceImage && <div className="reference-preview"><img src={referenceImage} alt="Reference preview" /><span>{referenceName}</span><button type="button" onClick={() => { setReferenceImage(''); setReferenceName(''); }}>×</button></div>}{mode === 'image-edit' && referenceImage && <>{extraReferences.map((item, index) => <div className="reference-preview" key={index}><img src={item.data} alt={`Reference ${index + 2} preview`} /><span>{`Image ${index + 2}: ${item.name}`}</span><button type="button" onClick={() => setExtraReferences(current => current.filter((_, i) => i !== index))}>×</button></div>)}{extraReferences.length < 2 && <label className="upload-trigger secondary-upload">+ Add another image<input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={event => { addExtraReferences(event.target.files).catch(error => setNotice(error.message)); event.target.value = ''; }} /></label>}<small className="reference-hint">Up to 3 images. Say in your prompt how to combine them, e.g. “put the outfit from image 2 on the child in image 1”.</small></>}{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{(mode === 'video' || mode === 'text-video') && <><label>Duration{pillGroup(videoTier === 'cinematic' ? [{ value: '5', label: '5s' }, { value: '10', label: '10s' }] : [{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && mode !== 'text-video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && mode !== 'text-video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'standard' && <label>Resolution{pillGroup([{ value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }], videoResolution, setVideoResolution)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'cinematic' && <p className="hint">Cinematic mode picks its own resolution automatically (up to 1080p).</p>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
       {notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{isVideoLike ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={downloadHref(image, isVideoLike ? 'gabitor-video.mp4' : 'gabitor-creation.png')} download={isVideoLike ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {isVideoLike ? 'video' : 'image'}</a></div>}
       </div>
       <div className="credit-line"><span>✦</span> {user ? `This generation costs ${creditCost} credits` : `This generation costs ${creditCost} credits · Register for 15 free credits`} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
