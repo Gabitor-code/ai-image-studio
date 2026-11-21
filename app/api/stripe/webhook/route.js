@@ -2,10 +2,15 @@ import { createClient } from '@supabase/supabase-js';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 // Keep in sync with the pricing cards in app/page.js and PLANS in
-// app/api/checkout/route.js. This is the number that's actually credited -
-// deliberately re-derived from the trusted `plan` name rather than trusting
-// the `metadata.credits` value checkout attached to the session.
-const PLAN_CREDITS = { starter: 200, creator: 550, pro: 1200 };
+// app/api/checkout/route.js. Each plan has exactly two legitimate credit
+// amounts: the normal one, and the Black Friday (Nov 23-30 2026) one.
+// checkout/route.js is what actually DECIDES which one applies, using its
+// own server clock at the moment of purchase - this webhook can run well
+// after that decision was made (the customer takes time to pay), so it must
+// not recompute Black Friday status itself. Instead it trusts
+// `metadata.credits` only when it's exactly one of these two known-good
+// numbers for the plan, never an arbitrary value.
+const PLAN_CREDIT_OPTIONS = { starter: [200, 300], creator: [550, 800], pro: [1200, 1650] };
 
 function validSignature(payload, signature, secret) {
   const values = Object.fromEntries(signature.split(',').map((entry) => entry.split('=')));
@@ -29,7 +34,9 @@ export async function POST(request) {
     const session = event.data.object;
     if (session.payment_status !== 'paid') return Response.json({ received: true });
     const userId = session.metadata?.supabase_user_id;
-    const credits = PLAN_CREDITS[session.metadata?.plan];
+    const planCreditOptions = PLAN_CREDIT_OPTIONS[session.metadata?.plan];
+    const metadataCredits = Number(session.metadata?.credits);
+    const credits = planCreditOptions && planCreditOptions.includes(metadataCredits) ? metadataCredits : undefined;
     if (!userId || !credits || !session.id) return Response.json({ error: 'Invalid credit purchase.' }, { status: 400 });
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     const { error } = await supabase.rpc('fulfill_stripe_credits', { p_session_id: session.id, p_user_id: userId, p_credits: credits });
