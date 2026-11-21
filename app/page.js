@@ -283,6 +283,7 @@ export default function Home() {
   }
 
   return <main>
+    {blackFridayActive && <div className="bf-ribbon"><a href="#pricing">🔥 <strong>BLACK FRIDAY</strong> · Up to +50% credits on every pack · Ends Nov 30</a></div>}
     <nav className="nav">
       <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
