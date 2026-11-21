@@ -15,6 +15,46 @@ function downloadHref(url, filename) {
   return `/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
 }
 
+// Black Friday 2026 promo window: Nov 23 00:00 - Nov 30 23:59:59,
+// America/Chicago. This check is purely a DISPLAY decision - it only
+// controls whether the page shows the Black Friday look and copy. The
+// credits actually charged/credited are always decided server-side (see
+// app/api/checkout/route.js), using the server's own clock, so a visitor
+// with a wrong system clock can never get a different price or credit
+// amount than the real calendar date allows - only a wrong-looking page.
+function chicagoDateKey(date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const hour = map.hour === '24' ? '00' : map.hour; // some ICU versions report midnight as "24"
+  return `${map.year}-${map.month}-${map.day}T${hour}:${map.minute}:${map.second}`;
+}
+const BLACK_FRIDAY_START = '2026-11-23T00:00:00';
+const BLACK_FRIDAY_END = '2026-11-30T23:59:59';
+// Fixed Dec 1 05:59:59Z = Nov 30 23:59:59 America/Chicago - this window never
+// crosses a US DST change (DST ends the first Sunday of November), so the
+// UTC offset is a safe constant for the countdown target.
+const BLACK_FRIDAY_END_UTC_MS = Date.parse('2026-12-01T05:59:59Z');
+function isBlackFridayActive(date) {
+  const key = chicagoDateKey(date);
+  return key >= BLACK_FRIDAY_START && key <= BLACK_FRIDAY_END;
+}
+
+// Keep normalCredits/bfCredits in sync with PLANS in app/api/checkout/route.js
+// and PLAN_CREDIT_OPTIONS in app/api/stripe/webhook/route.js.
+const PRICING_PLANS = [
+  { key: 'starter', name: 'STARTER', price: '$10', normalCredits: 200, bfCredits: 300, bfBadge: '+50%', blurb: 'Private creations · No subscription', popular: false },
+  { key: 'creator', name: 'CREATOR', price: '$25', normalCredits: 550, bfCredits: 800, bfBadge: '+45%', blurb: 'Private creations · No subscription', popular: true },
+  { key: 'pro', name: 'PRO', price: '$50', normalCredits: 1200, bfCredits: 1650, bfBadge: '+38%', blurb: 'Private creations · Best value', popular: false }
+];
+// Matches the display-only estimate already used for these cards (2 credits
+// per image; 4 credits/sec assumes the cheapest, Cinematic video tier).
+function creditsBlurb(credits) {
+  return `~${Math.round(credits / 2)} images or ~${Math.floor(credits / 4)} sec of video`;
+}
+
 const samples = [
   ['Neon Nights', 'A futuristic city after rain, with neon reflections across the streets', 'image', '/gallery/neon-city.webp'],
   ['Prism', 'A sculptural glass perfume bottle floating above deep blue marble', 'image', '/gallery/prism-bottle.webp'],
@@ -60,6 +100,7 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [credits, setCredits] = useState(null);
   const [creations, setCreations] = useState([]);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   async function readApiResponse(response) {
     const body = await response.text();
@@ -113,6 +154,16 @@ export default function Home() {
   }
 
   useEffect(() => { refreshCreations(user); }, [user]);
+
+  // Ticks every second while Black Friday is live (for the countdown), and
+  // every 30s otherwise - just often enough to flip the page over around
+  // the Nov 23 / Nov 30 boundary for a tab left open across it.
+  const blackFridayActive = isBlackFridayActive(new Date(nowTick));
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), blackFridayActive ? 1000 : 30000);
+    return () => clearInterval(interval);
+  }, [blackFridayActive]);
+  const signupBonus = blackFridayActive ? 40 : 20;
 
   async function submitAuth(event) {
     event.preventDefault();
@@ -262,7 +313,7 @@ export default function Home() {
       {showSettings && <div className="settings-panel"><label>Style<select value={style} onChange={event => setStyle(event.target.value)}><option>None</option><option>Photorealistic</option><option>Cinematic</option><option>Fantasy art</option><option>Anime</option><option>Product photography</option><option>Watercolor</option></select></label>{mode !== 'video' && <label>Aspect ratio{pillGroup([{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }], aspectRatio, setAspectRatio)}</label>}{mode === 'video' && <p className="hint">Video aspect ratio follows your uploaded photo automatically.</p>}{(mode === 'video' || mode === 'text-video') && <label>Engine{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'cinematic', label: 'Cinematic' }], videoTier, setVideoTier)}</label>}{(mode === 'image-edit' || mode === 'video') && <div className="reference-field"><span>{mode === 'video' ? 'Source image for video' : 'Reference images (up to 3)'}</span><div className="reference-slots">{(mode === 'image-edit' ? [0, 1, 2] : [0]).map(slot => { const item = slot === 0 ? (referenceImage ? { data: referenceImage, name: referenceName } : null) : extraReferences[slot - 1]; const locked = slot > 0 && !referenceImage; return <div key={slot} className={`reference-slot${item ? ' filled' : ''}${locked ? ' locked' : ''}`} title={item ? item.name : slot === 0 ? 'Main image' : `Image ${slot + 1}`}>{item ? <><img src={item.data} alt={`Reference ${slot + 1}`} /><button type="button" aria-label={`Remove image ${slot + 1}`} onClick={() => clearReferenceSlot(slot)}>×</button></> : <label><span className="slot-plus">+</span><span className="slot-label">{slot === 0 ? 'Main' : slot + 1}</span><input type="file" accept="image/png,image/jpeg,image/webp" disabled={locked} onChange={event => { setReferenceSlot(slot, event.target.files?.[0]).catch(error => setNotice(error.message)); event.target.value = ''; }} /></label>}<span className="slot-number">{slot + 1}</span></div>; })}{mode === 'image-edit' && <small className="reference-hint">Tell the prompt how to combine them, e.g. “outfit from image 2 on the child in image 1”.</small>}</div>{mode === 'image-edit' && <label>Reference strength{pillGroup([{ value: '0.2', label: '20%' }, { value: '0.3', label: '30%' }, { value: '0.5', label: '50%' }, { value: '0.7', label: '70%' }], referenceStrength, setReferenceStrength)}</label>}</div>}{(mode === 'video' || mode === 'text-video') && <><label>Duration{pillGroup(videoTier === 'cinematic' ? [{ value: '5', label: '5s' }, { value: '10', label: '10s' }] : [{ value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }], duration, setDuration)}</label><label>Motion{pillGroup([{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], motion, setMotion)}</label></>}{mode !== 'video' && mode !== 'text-video' && <label>Image size{pillGroup([{ value: '512', label: '512' }, { value: '768', label: '768' }, { value: '1024', label: '1024' }], resolution, setResolution)}</label>}{mode !== 'video' && mode !== 'text-video' && <label>Quality{pillGroup([{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High detail' }], quality, setQuality)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'standard' && <label>Resolution{pillGroup([{ value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }], videoResolution, setVideoResolution)}</label>}{(mode === 'video' || mode === 'text-video') && videoTier === 'cinematic' && <p className="hint">Cinematic mode picks its own resolution automatically (up to 1080p).</p>}<label>Negative prompt<input value={negativePrompt} onChange={event => setNegativePrompt(event.target.value)} placeholder="What should be avoided?" /></label>{mode !== 'video' && <label>Seed<input type="number" value={seed} onChange={event => setSeed(event.target.value)} /></label>}</div>}
       {notice && <p className="notice">{notice}</p>}{image && <div className="result-image">{isVideoLike ? <video src={image} controls playsInline /> : <img src={image} alt="Your Gabitor creation" />}<a className="download-image" href={downloadHref(image, isVideoLike ? 'gabitor-video.mp4' : 'gabitor-creation.png')} download={isVideoLike ? 'gabitor-video.mp4' : 'gabitor-creation.png'}>↓ Download {isVideoLike ? 'video' : 'image'}</a></div>}
       </div>
-      <div className="credit-line"><span>✦</span> {user ? `This generation costs ${creditCost} credits` : `This generation costs ${creditCost} credits · Register for 15 free credits`} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
+      <div className="credit-line"><span>✦</span> {user ? `This generation costs ${creditCost} credits` : `This generation costs ${creditCost} credits · Register for ${signupBonus} free credits`} <button onClick={() => user ? buyCredits('creator') : openSignup()}>{user ? 'Get credits' : 'Register now'}</button></div>
     </section>
     <section id="gallery" className="gallery-section">
       <div className="section-title"><p>02 / INSPIRATION</p><h2>Start with an idea.</h2></div><div className="sample-grid">
@@ -270,11 +321,11 @@ export default function Home() {
       <button className="gallery-button" onClick={() => setShowGallery(!showGallery)}>{showGallery ? 'Close gallery' : 'Open gallery'} <span>→</span></button>
       {showGallery && <div className="my-creations"><h3>My creations</h3>{user && creations.length ? <div className="creation-grid">{creations.map(creation => <article className="creation-card" key={creation.id}>{(creation.kind === 'video' || creation.kind === 'text-video') ? <video className="creation-media" src={creation.image} controls playsInline preload="metadata" /> : <img className="creation-media" src={creation.image} alt={creation.prompt} />}<div><p>{creation.prompt}</p><a href={downloadHref(creation.image, `gabitor-${creation.id}.${(creation.kind === 'video' || creation.kind === 'text-video') ? 'mp4' : 'png'}`)} download={`gabitor-${creation.id}.${(creation.kind === 'video' || creation.kind === 'text-video') ? 'mp4' : 'png'}`}>Download ↓</a></div></article>)}</div> : <div className="coming">{user ? 'Your generated images and videos will appear here.' : 'Sign in to save and view your creations here.'}</div>}</div>}
     </section>
-    <section id="pricing" className="pricing"><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2><div className="price-grid"><div className="price-card"><p>STARTER</p><h3>$10</h3><strong>200 credits</strong><span>~100 images or ~50 sec of video · Private creations · No subscription</span><button onClick={() => buyCredits('starter')}>Choose Starter →</button></div><div className="price-card popular"><p>✦ MOST POPULAR</p><h3>$25</h3><strong>550 credits</strong><span>~275 images or ~137 sec of video · Private creations · No subscription</span><button onClick={() => buyCredits('creator')}>Choose Creator →</button></div><div className="price-card"><p>PRO</p><h3>$50</h3><strong>1200 credits</strong><span>~600 images or ~300 sec of video · Private creations · Best value</span><button onClick={() => buyCredits('pro')}>Choose Pro →</button></div></div></section>
+    <section id="pricing" className={blackFridayActive ? 'pricing bf-active' : 'pricing'}>{blackFridayActive && <div className="bf-ghost-wrap">{[0, 1, 2, 3, 4, 5].map(index => <div className="bf-ghost-row" key={index}>{'BLACK FRIDAY '.repeat(4)}</div>)}</div>}{blackFridayActive ? <div className="bf-banner"><p className="bf-eyebrow">LIMITED TIME · ENDS NOV 30</p><h2 className="bf-headline">BLACK FRIDAY</h2><div className="bf-sub-offer"><span className="bf-line" /><span className="bf-offer-text">UP TO +50% CREDITS</span><span className="bf-line" /></div><div className="bf-countdown">{(() => { const remaining = Math.max(0, BLACK_FRIDAY_END_UTC_MS - nowTick); const d = Math.floor(remaining / 86400000); const h = Math.floor((remaining % 86400000) / 3600000); const m = Math.floor((remaining % 3600000) / 60000); const s = Math.floor((remaining % 60000) / 1000); return [['Days', d], ['Hours', h], ['Min', m], ['Sec', s]].map(([label, value]) => <div className="bf-unit" key={label}><span className="bf-num">{String(value).padStart(2, '0')}</span><span className="bf-lbl">{label}</span></div>); })()}</div></div> : <><p>CREDIT PACKS</p><h2>Create more. Pay less.</h2></>}<div className="price-grid">{PRICING_PLANS.map(plan => <div className={plan.popular ? 'price-card popular' : 'price-card'} key={plan.key}><p>{plan.popular ? '✦ MOST POPULAR' : plan.name}</p><h3>{plan.price}</h3>{blackFridayActive ? <div className="bf-credit-row"><span className="credit-old">{plan.normalCredits} credits</span><strong>{plan.bfCredits} credits</strong><span className="bf-badge">{plan.bfBadge}</span></div> : <strong>{plan.normalCredits} credits</strong>}<span>{creditsBlurb(blackFridayActive ? plan.bfCredits : plan.normalCredits)} · {plan.blurb}</span><button onClick={() => buyCredits(plan.key)}>Choose {plan.name.charAt(0) + plan.name.slice(1).toLowerCase()} →</button></div>)}</div>{blackFridayActive && <p className="bf-footer-note">New accounts get 40 free credits during Black Friday (normally 20). Offer ends Nov 30, 23:59 CT.</p>}</section>
     <footer><div className="footer-top"><a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a><div className="footer-links"><a href="/ai-product-photography-generator">FAQ</a><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a></div></div><p className="footer-copyright">© 2026 Gabitor AI</p></footer>
     {authOpen && <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Account access"><form className="auth-card" onSubmit={submitAuth}>
       <button type="button" className="auth-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button><p className="eyebrow">GABITOR ACCOUNT</p>
-      <h2>{authMode === 'signup' ? 'Start creating.' : 'Welcome back.'}</h2><p>{authMode === 'signup' ? 'Register now and receive 15 free credits.' : 'Sign in to access your credits and creations.'}</p>
+      <h2>{authMode === 'signup' ? 'Start creating.' : 'Welcome back.'}</h2><p>{authMode === 'signup' ? `Register now and receive ${signupBonus} free credits.` : 'Sign in to access your credits and creations.'}</p>
       <label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} required autoComplete="email" /></label>
       <label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength="6" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} /></label>
       {authMessage && <p className="auth-message">{authMessage}</p>}<button className="generate auth-submit" disabled={loading}>{loading ? 'Please wait…' : authMode === 'signup' ? 'Create account →' : 'Sign in →'}</button>
