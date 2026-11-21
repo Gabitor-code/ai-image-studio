@@ -159,6 +159,11 @@ export default function Home() {
   // every 30s otherwise - just often enough to flip the page over around
   // the Nov 23 / Nov 30 boundary for a tab left open across it.
   const blackFridayActive = isBlackFridayActive(new Date(nowTick));
+  // Teaser period: shown before the promo actually starts, so the ribbon can
+  // announce the Nov 23 start date ahead of time instead of appearing out of
+  // nowhere. Once Nov 23 hits, blackFridayActive takes over and the ribbon
+  // switches to the live "+50% credits" message.
+  const blackFridayUpcoming = !blackFridayActive && chicagoDateKey(new Date(nowTick)) < BLACK_FRIDAY_START;
   useEffect(() => {
     const interval = setInterval(() => setNowTick(Date.now()), blackFridayActive ? 1000 : 30000);
     return () => clearInterval(interval);
@@ -283,7 +288,7 @@ export default function Home() {
   }
 
   return <main>
-    {blackFridayActive && <div className="bf-ribbon"><a href="#pricing">🔥 <strong>BLACK FRIDAY</strong> · Up to +50% credits on every pack · Ends Nov 30</a></div>}
+    {(blackFridayActive || blackFridayUpcoming) && <div className="bf-ribbon"><a href="#pricing">🔥 <strong>BLACK FRIDAY</strong> {blackFridayActive ? '· Up to +50% credits on every pack · Ends Nov 30' : '· Starts Nov 23 · Up to +50% credits'}</a></div>}
     <nav className="nav">
       <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
