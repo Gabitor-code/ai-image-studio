@@ -288,7 +288,7 @@ export default function Home() {
   }
 
   return <main>
-    {(blackFridayActive || blackFridayUpcoming) && <div className="bf-ribbon"><a href="#pricing">🔥 <strong>BLACK FRIDAY</strong> {blackFridayActive ? '· Up to +50% credits on every pack · Ends Nov 30' : '· Starts Nov 23 · Up to +50% credits'}</a></div>}
+    {(blackFridayActive || blackFridayUpcoming) && <div className="bf-ribbon"><a href="#pricing">🔥 <strong>BLACK FRIDAY</strong> {blackFridayActive ? '· Up to +50% more credits · Ends Nov 30' : '· Starts Nov 23 · Up to +50% more credits'}</a></div>}
     <nav className="nav">
       <a className="brand" href="#top"><img src="/logo.png" alt="Gabitor AI" className="brand-logo" /><span className="brand-name">GABITOR</span></a>
       <div className="nav-links"><a href="#studio">Studio</a><a href="#gallery">Gallery</a><a href="#pricing">Pricing</a></div>
